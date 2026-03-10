@@ -59,6 +59,7 @@ async function saveSignal(parsedSignal: ParsedSignal, source: string): Promise<{
         marketType: parsedSignal.marketType,
         entryPrices: JSON.stringify(parsedSignal.entryPrices),
         entryZone: parsedSignal.entryZone ? JSON.stringify(parsedSignal.entryZone) : null,
+        entryWeights: parsedSignal.entryWeights ? JSON.stringify(parsedSignal.entryWeights) : null,
         takeProfits: JSON.stringify(parsedSignal.takeProfits),
         stopLoss: parsedSignal.stopLoss,
         leverage: parsedSignal.leverage,

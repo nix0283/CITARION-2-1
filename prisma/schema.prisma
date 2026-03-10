@@ -2764,3 +2764,409 @@ model DailyRiskMetrics {
   @@unique([userId, date])
   @@index([userId, date])
 }
+
+// ==================== TRADING JOURNAL ====================
+// Professional trading journal for trade analysis and improvement
+
+model JournalEntry {
+  id          String   @id @default(cuid())
+  userId      String
+
+  // Entry details
+  title       String
+  content     String   // Main journal content/notes
+
+  // Trade reference (optional link to actual trade)
+  tradeId     String?
+
+  // Market context
+  symbol      String?
+  direction   String?  // LONG or SHORT
+  marketCondition String @default("neutral") // trending, ranging, volatile, choppy, neutral
+
+  // Trade metrics
+  entryPrice  Float?
+  exitPrice   Float?
+  size        Float?
+  pnl         Float    @default(0)
+  pnlPercent  Float    @default(0)
+
+  // Analysis
+  entryQuality    Float   @default(0)  // 0-1 score
+  exitQuality     Float   @default(0)  // 0-1 score
+  riskManagement  Float   @default(0)  // 0-1 score
+
+  // Reflection
+  lessons     String   @default("[]")  // JSON array of lessons learned
+  mistakes    String   @default("[]")  // JSON array of mistakes made
+  improvements String  @default("[]")  // JSON array of improvements
+
+  // Emotion tracking
+  emotion     String   @default("neutral") // confident, neutral, fearful, greedy, anxious, hopeful
+
+  // Tags for filtering
+  tags        String   @default("[]")  // JSON array of tags
+
+  // Review status
+  reviewStatus String  @default("pending") // pending, reviewed, archived
+
+  // Trade metadata
+  confidence      Float?  // Signal confidence at entry
+  signalSource    String? // Where the trade idea came from
+  timeInTrade     Int?    // Duration in minutes
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  tradeDate   DateTime  @default(now())  // Date of the actual trade
+
+  @@index([userId, reviewStatus])
+  @@index([userId, tradeDate])
+  @@index([symbol])
+  @@index([marketCondition])
+}
+
+// Journal statistics cache for performance
+model JournalStats {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+
+  // Trade counts
+  totalEntries      Int     @default(0)
+  totalTrades       Int     @default(0)
+  winningTrades     Int     @default(0)
+  losingTrades      Int     @default(0)
+
+  // Win rate
+  winRate           Float   @default(0)
+
+  // PnL metrics
+  totalPnL          Float   @default(0)
+  avgPnL            Float   @default(0)
+  avgWin            Float   @default(0)
+  avgLoss           Float   @default(0)
+  profitFactor      Float   @default(0)
+
+  // Quality metrics
+  avgEntryQuality   Float   @default(0)
+  avgExitQuality    Float   @default(0)
+  avgRiskMgmt       Float   @default(0)
+
+  // Market condition stats (JSON)
+  byCondition       String  @default("{}")
+
+  // Emotion stats (JSON)
+  byEmotion         String  @default("{}")
+
+  // Time-based patterns (JSON)
+  byHour            String  @default("{}")
+  byDayOfWeek       String  @default("{}")
+
+  // Detected patterns (JSON)
+  patterns          String  @default("[]")
+
+  lastUpdated       DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ==================== NEWS SERVICE ====================
+// Crypto news aggregation and sentiment analysis
+
+model NewsArticle {
+  id            String   @id @default(cuid())
+  
+  // Article identification
+  externalId    String?  @unique // ID from external source
+  title         String
+  summary       String
+  content       String?
+  url           String
+  imageUrl      String?
+  
+  // Source information
+  source        String   // CoinDesk, CoinTelegraph, Decrypt, etc.
+  author        String?
+  
+  // Categorization
+  category      String   @default("general") // market, regulation, technology, trading, defi, nft, etc.
+  tags          String   @default("[]") // JSON array
+  
+  // Sentiment analysis
+  sentiment     String   @default("neutral") // bullish, bearish, neutral
+  sentimentScore Float   @default(0) // -1 to +1
+  confidence    Float    @default(0) // 0 to 1
+  
+  // Related assets
+  relatedSymbols String  @default("[]") // JSON array: ["BTC", "ETH", "SOL"]
+  
+  // Importance rating
+  importance    String   @default("medium") // low, medium, high, critical
+  
+  // Timestamps
+  publishedAt   DateTime
+  fetchedAt     DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Status
+  isActive      Boolean  @default(true)
+  isProcessed   Boolean  @default(false)
+  
+  @@index([source, publishedAt])
+  @@index([category, publishedAt])
+  @@index([sentiment, publishedAt])
+  @@index([importance, publishedAt])
+  @@index([isActive, publishedAt])
+}
+
+model NewsSource {
+  id            String   @id @default(cuid())
+  
+  // Source identification
+  name          String   @unique // CoinDesk, CoinTelegraph, etc.
+  displayName   String
+  url           String
+  rssUrl        String?
+  apiUrl        String?
+  
+  // Configuration
+  enabled       Boolean  @default(true)
+  fetchInterval Int      @default(30) // minutes
+  rateLimit     Int      @default(60) // requests per hour
+  
+  // Status
+  lastFetchedAt DateTime?
+  lastError     String?
+  totalFetched  Int      @default(0)
+  status        String   @default("active") // active, paused, error
+  
+  // Priority
+  priority      Int      @default(1) // 1 = highest
+  
+  // Timestamps
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([enabled, status])
+}
+
+model NewsAlert {
+  id            String   @id @default(cuid())
+  userId        String
+  
+  // Alert configuration
+  name          String
+  keywords      String   @default("[]") // JSON array
+  symbols       String   @default("[]") // JSON array
+  sources       String   @default("[]") // JSON array
+  categories    String   @default("[]") // JSON array
+  sentiment     String?  // bullish, bearish, neutral, or null for all
+  minImportance String   @default("medium") // minimum importance level
+  
+  // Delivery settings
+  notifyVia     String   @default("app") // app, email, telegram
+  isActive      Boolean  @default(true)
+  
+  // Last triggered
+  lastTriggeredAt DateTime?
+  triggerCount  Int      @default(0)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([userId, isActive])
+}
+
+model NewsBookmark {
+  id            String   @id @default(cuid())
+  userId        String
+  articleId     String
+  
+  // Optional note
+  note          String?
+  
+  createdAt     DateTime @default(now())
+  
+  @@unique([userId, articleId])
+  @@index([userId, createdAt])
+}
+
+// ==================== BACKUP STRATEGY ====================
+// Automated backup management and recovery
+
+model BackupRecord {
+  id            String   @id @default(cuid())
+  
+  // Backup identification
+  name          String
+  description   String?
+  
+  // Backup details
+  type          String   @default("full") // full, incremental, differential
+  status        String   @default("pending") // pending, running, completed, failed, cancelled
+  
+  // File information
+  fileName      String
+  filePath      String?
+  fileSize      Float    @default(0) // bytes
+  checksum      String?  // SHA-256 hash for integrity
+  compressed    Boolean  @default(true)
+  encrypted     Boolean  @default(true)
+  
+  // Scope
+  scope         String   @default("database") // database, config, logs, all
+  tables        String   @default("[]") // JSON array of included tables
+  
+  // Scheduling
+  scheduledAt   DateTime?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  
+  // Result
+  errorMessage  String?
+  warningCount  Int      @default(0)
+  recordCount   Int      @default(0) // Number of records backed up
+  
+  // Retention
+  expiresAt     DateTime?
+  retentionDays Int      @default(30)
+  
+  // Trigger info
+  triggeredBy   String   @default("manual") // manual, scheduled, api
+  triggeredById String?  // User ID if manual
+  
+  // Metadata
+  metadata      String   @default("{}") // JSON for additional info
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([status, createdAt])
+  @@index([type, status])
+  @@index([expiresAt])
+}
+
+model BackupSchedule {
+  id            String   @id @default(cuid())
+  
+  // Schedule identification
+  name          String
+  description   String?
+  isActive      Boolean  @default(true)
+  
+  // Schedule configuration
+  frequency     String   @default("daily") // hourly, daily, weekly, monthly
+  cronExpression String? // Custom cron expression
+  
+  // Time settings
+  hour          Int      @default(2) // 0-23
+  minute        Int      @default(0) // 0-59
+  dayOfWeek     Int?     // 0-6 (Sunday = 0) for weekly
+  dayOfMonth    Int?     // 1-31 for monthly
+  
+  // Backup configuration
+  type          String   @default("full") // full, incremental
+  scope         String   @default("database")
+  retentionDays Int      @default(30)
+  compress      Boolean  @default(true)
+  encrypt       Boolean  @default(true)
+  
+  // Notification settings
+  notifyOnSuccess Boolean @default(true)
+  notifyOnFailure Boolean @default(true)
+  notifyChannels  String  @default("[]") // JSON: ["telegram", "email"]
+  
+  // Last run
+  lastRunAt     DateTime?
+  lastRunStatus String?
+  nextRunAt     DateTime?
+  
+  // Statistics
+  totalRuns     Int      @default(0)
+  successCount  Int      @default(0)
+  failureCount  Int      @default(0)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([isActive, nextRunAt])
+}
+
+model BackupConfig {
+  id            String   @id @default(cuid())
+  
+  // General settings
+  enabled       Boolean  @default(true)
+  
+  // Storage settings
+  storageType   String   @default("local") // local, s3, gcs, azure
+  storagePath   String   @default("./backups")
+  
+  // Cloud storage config (encrypted)
+  cloudConfig   String?  // JSON with encrypted credentials
+  
+  // Retention policy
+  defaultRetentionDays Int @default(30)
+  maxBackups    Int      @default(100)
+  minFreeSpace  Float    @default(10) // GB
+  
+  // Encryption
+  encryptionEnabled Boolean @default(true)
+  encryptionKey     String? // Encrypted master key
+  
+  // Compression
+  compressionEnabled Boolean @default(true)
+  compressionLevel   Int    @default(6) // 1-9
+  
+  // Performance
+  maxConcurrentBackups Int @default(1)
+  backupTimeout        Int @default(3600) // seconds
+  
+  // Notifications
+  notificationEmail   String?
+  notificationTelegram String?
+  
+  // Statistics
+  totalBackups      Int   @default(0)
+  totalSizeBytes    Float @default(0)
+  lastBackupAt      DateTime?
+  lastSuccessfulAt  DateTime?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model RestoreRecord {
+  id            String   @id @default(cuid())
+  
+  // Restore identification
+  backupId      String?
+  backupName    String
+  
+  // Status
+  status        String   @default("pending") // pending, running, completed, failed, cancelled
+  
+  // Restore options
+  restoreMode   String   @default("replace") // replace, merge, new_database
+  targetScope   String   @default("database")
+  targetTables  String   @default("[]") // JSON array
+  
+  // Progress
+  startedAt     DateTime?
+  completedAt   DateTime?
+  progress      Float    @default(0) // 0-100
+  
+  // Result
+  recordsRestored Int    @default(0)
+  tablesRestored  Int    @default(0)
+  errorMessage    String?
+  
+  // Trigger
+  triggeredBy   String   @default("manual")
+  triggeredById String?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([status, createdAt])
+}

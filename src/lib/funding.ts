@@ -668,6 +668,430 @@ export function calculatePnLWithFunding(params: {
   };
 }
 
+// ==================== HEAT LEVEL & ANALYTICS ====================
+
+export type HeatLevel = "low" | "medium" | "high" | "critical";
+
+export interface FundingAnalytics {
+  symbol: string;
+  exchange: string;
+  currentRate: number;
+  annualizedRate: number;
+  nextFundingTime: Date;
+  hoursUntilNextFunding: number;
+  markPrice: number;
+  indexPrice: number;
+  openInterest?: number;
+  openInterestUsd?: number;
+  heatLevel: HeatLevel;
+  heatScore: number;
+  roiEstimate: {
+    daily: number;
+    weekly: number;
+    monthly: number;
+  };
+  recommendation: string;
+}
+
+export interface OpenInterestData {
+  symbol: string;
+  exchange: string;
+  openInterest: number;      // In contracts
+  openInterestUsd: number;   // In USD
+  timestamp: Date;
+}
+
+/**
+ * Calculate heat level based on multiple risk indicators
+ * 
+ * Scoring system:
+ * - Funding rate contribution (0-4 points)
+ * - Open interest contribution (0-3 points)
+ * - Volume ratio contribution (0-2 points)
+ * - Price deviation contribution (0-2 points)
+ * 
+ * Total: 0-11 points
+ * 
+ * low: 0-2 points
+ * medium: 3-5 points
+ * high: 6-8 points
+ * critical: 9-11 points
+ */
+export function calculateHeatLevel(data: {
+  fundingRate: number;
+  openInterestUsd?: number;
+  markPrice?: number;
+  indexPrice?: number;
+  volume24h?: number;
+}): { level: HeatLevel; score: number; breakdown: Record<string, number> } {
+  let score = 0;
+  const breakdown: Record<string, number> = {};
+
+  // 1. Funding rate contribution (annualized)
+  const annualizedRate = Math.abs(data.fundingRate) * 3 * 365; // 3 fundings per day
+  if (annualizedRate > 2.0) {
+    score += 4;
+    breakdown.fundingRate = 4;
+  } else if (annualizedRate > 1.0) {
+    score += 3;
+    breakdown.fundingRate = 3;
+  } else if (annualizedRate > 0.5) {
+    score += 2;
+    breakdown.fundingRate = 2;
+  } else if (annualizedRate > 0.1) {
+    score += 1;
+    breakdown.fundingRate = 1;
+  } else {
+    breakdown.fundingRate = 0;
+  }
+
+  // 2. Open interest spike detection
+  if (data.openInterestUsd) {
+    if (data.openInterestUsd > 1e10) {
+      score += 3;
+      breakdown.openInterest = 3;
+    } else if (data.openInterestUsd > 5e9) {
+      score += 2;
+      breakdown.openInterest = 2;
+    } else if (data.openInterestUsd > 1e9) {
+      score += 1;
+      breakdown.openInterest = 1;
+    } else {
+      breakdown.openInterest = 0;
+    }
+  }
+
+  // 3. Volume ratio (liquidity pressure)
+  if (data.volume24h && data.openInterestUsd) {
+    const volumeRatio = data.volume24h / data.openInterestUsd;
+    if (volumeRatio > 0.5) {
+      score += 2;
+      breakdown.volumeRatio = 2;
+    } else if (volumeRatio > 0.3) {
+      score += 1;
+      breakdown.volumeRatio = 1;
+    } else {
+      breakdown.volumeRatio = 0;
+    }
+  }
+
+  // 4. Price deviation (mark vs index)
+  if (data.markPrice && data.indexPrice && data.indexPrice > 0) {
+    const deviation = Math.abs(data.markPrice - data.indexPrice) / data.indexPrice;
+    if (deviation > 0.01) {
+      score += 2;
+      breakdown.priceDeviation = 2;
+    } else if (deviation > 0.005) {
+      score += 1;
+      breakdown.priceDeviation = 1;
+    } else {
+      breakdown.priceDeviation = 0;
+    }
+  }
+
+  // Determine heat level
+  let level: HeatLevel;
+  if (score >= 9) {
+    level = "critical";
+  } else if (score >= 6) {
+    level = "high";
+  } else if (score >= 3) {
+    level = "medium";
+  } else {
+    level = "low";
+  }
+
+  return { level, score, breakdown };
+}
+
+/**
+ * Calculate estimated ROI from funding over different time periods
+ * 
+ * @param fundingRate - Current funding rate (decimal: 0.0001 = 0.01%)
+ * @param days - Number of days to project
+ * @param fundingsPerDay - Number of funding settlements per day (default: 3)
+ * @returns ROI percentage
+ */
+export function calculateFundingROI(
+  fundingRate: number,
+  days: number,
+  fundingsPerDay: number = 3
+): number {
+  const totalFundings = fundingsPerDay * days;
+  const roi = fundingRate * totalFundings * 100;
+  return roi;
+}
+
+/**
+ * Calculate comprehensive funding analytics for a symbol
+ */
+export function calculateFundingAnalytics(data: {
+  symbol: string;
+  exchange: string;
+  fundingRate: number;
+  fundingTime: Date;
+  markPrice: number;
+  indexPrice: number;
+  openInterestUsd?: number;
+  volume24h?: number;
+}): FundingAnalytics {
+  // Calculate annualized rate
+  const annualizedRate = data.fundingRate * 3 * 365;
+
+  // Calculate hours until next funding
+  const now = new Date();
+  const hoursUntilNextFunding = Math.max(
+    0,
+    (data.fundingTime.getTime() - now.getTime()) / (1000 * 60 * 60)
+  );
+
+  // Calculate heat level
+  const { level: heatLevel, score: heatScore } = calculateHeatLevel({
+    fundingRate: data.fundingRate,
+    openInterestUsd: data.openInterestUsd,
+    markPrice: data.markPrice,
+    indexPrice: data.indexPrice,
+    volume24h: data.volume24h,
+  });
+
+  // Calculate ROI estimates
+  const roiEstimate = {
+    daily: calculateFundingROI(data.fundingRate, 1),
+    weekly: calculateFundingROI(data.fundingRate, 7),
+    monthly: calculateFundingROI(data.fundingRate, 30),
+  };
+
+  // Generate recommendation
+  let recommendation: string;
+  if (heatLevel === "critical") {
+    recommendation = data.fundingRate > 0
+      ? "⚠️ EXTREME: Consider reducing LONG positions. Funding costs are very high."
+      : "⚠️ EXTREME: Consider reducing SHORT positions. Funding costs are very high.";
+  } else if (heatLevel === "high") {
+    recommendation = data.fundingRate > 0
+      ? "🔴 HIGH: LONG positions paying premium. Consider taking profits."
+      : "🔴 HIGH: SHORT positions paying premium. Consider taking profits.";
+  } else if (heatLevel === "medium") {
+    recommendation = data.fundingRate > 0
+      ? "🟡 MODERATE: Funding is slightly elevated. Monitor positions."
+      : "🟡 MODERATE: Funding is slightly negative. Monitor positions.";
+  } else {
+    recommendation = "🟢 NORMAL: Funding rates are within normal range.";
+  }
+
+  return {
+    symbol: data.symbol,
+    exchange: data.exchange,
+    currentRate: data.fundingRate,
+    annualizedRate,
+    nextFundingTime: data.fundingTime,
+    hoursUntilNextFunding,
+    markPrice: data.markPrice,
+    indexPrice: data.indexPrice,
+    openInterestUsd: data.openInterestUsd,
+    heatLevel,
+    heatScore,
+    roiEstimate,
+    recommendation,
+  };
+}
+
+/**
+ * Fetch open interest from exchange
+ */
+export async function fetchOpenInterest(
+  symbol: string,
+  exchange: ExchangeType = "binance"
+): Promise<OpenInterestData | null> {
+  const urls: Record<ExchangeType, string> = {
+    binance: `https://fapi.binance.com/fapi/v1/openInterest?symbol=${symbol}`,
+    bybit: `https://api.bybit.com/v5/market/open-interest?category=linear&symbol=${symbol}`,
+    okx: `https://www.okx.com/api/v5/public/open-interest?instId=${symbol.replace("USDT", "-USDT-SWAP")}`,
+    bitget: `https://api.bitget.com/api/v2/mix/market/open-interest?productType=USDT-FUTURES&symbol=${symbol}`,
+    kucoin: `https://api-futures.kucoin.com/api/v1/openInterest?symbol=${symbol}`,
+    bingx: `https://open-api.bingx.com/openApi/swap/v2/quote/openInterest?symbol=${symbol.replace("USDT", "-USDT")}`,
+  };
+
+  try {
+    const url = urls[exchange];
+    const response = await fetch(url);
+    const data = await response.json();
+
+    switch (exchange) {
+      case "binance": {
+        const binanceData = data as { openInterest: string; symbol: string; time: number };
+        return {
+          symbol: binanceData.symbol,
+          exchange: "binance",
+          openInterest: parseFloat(binanceData.openInterest),
+          openInterestUsd: parseFloat(binanceData.openInterest), // Binance returns in USD
+          timestamp: new Date(binanceData.time),
+        };
+      }
+
+      case "bybit": {
+        const bybitData = data as { result?: { openInterest?: string; timestamp?: number } };
+        if (bybitData.result?.openInterest) {
+          return {
+            symbol,
+            exchange: "bybit",
+            openInterest: parseFloat(bybitData.result.openInterest),
+            openInterestUsd: parseFloat(bybitData.result.openInterest),
+            timestamp: new Date(bybitData.result.timestamp || Date.now()),
+          };
+        }
+        return null;
+      }
+
+      case "okx": {
+        const okxData = data as { data?: Array<{ oi: string; oiCcy: string; ts: string }> };
+        if (okxData.data?.[0]) {
+          const item = okxData.data[0];
+          return {
+            symbol: symbol,
+            exchange: "okx",
+            openInterest: parseFloat(item.oi),
+            openInterestUsd: parseFloat(item.oiCcy),
+            timestamp: new Date(parseInt(item.ts)),
+          };
+        }
+        return null;
+      }
+
+      case "bitget": {
+        const bitgetData = data as { data?: Array<{ openInterest: string; ts: string }> };
+        if (bitgetData.data?.[0]) {
+          const item = bitgetData.data[0];
+          return {
+            symbol,
+            exchange: "bitget",
+            openInterest: parseFloat(item.openInterest),
+            openInterestUsd: parseFloat(item.openInterest),
+            timestamp: new Date(parseInt(item.ts)),
+          };
+        }
+        return null;
+      }
+
+      case "kucoin": {
+        const kucoinData = data as { data?: { openInterest: string; timestamp: number } };
+        if (kucoinData.data) {
+          return {
+            symbol,
+            exchange: "kucoin",
+            openInterest: parseFloat(kucoinData.data.openInterest),
+            openInterestUsd: parseFloat(kucoinData.data.openInterest),
+            timestamp: new Date(kucoinData.data.timestamp),
+          };
+        }
+        return null;
+      }
+
+      case "bingx": {
+        const bingxData = data as { data?: { openInterest: string; timestamp: number } };
+        if (bingxData.data) {
+          return {
+            symbol,
+            exchange: "bingx",
+            openInterest: parseFloat(bingxData.data.openInterest),
+            openInterestUsd: parseFloat(bingxData.data.openInterest),
+            timestamp: new Date(bingxData.data.timestamp),
+          };
+        }
+        return null;
+      }
+
+      default:
+        return null;
+    }
+  } catch (error) {
+    console.error(`[Funding] Failed to fetch open interest for ${symbol} on ${exchange}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Calculate funding rate history statistics
+ */
+export function calculateFundingStats(rates: FundingRateHistory[]): {
+  avgRate: number;
+  minRate: number;
+  maxRate: number;
+  totalFundings: number;
+  avgAnnualized: number;
+  trend: "increasing" | "decreasing" | "stable";
+} {
+  if (rates.length === 0) {
+    return {
+      avgRate: 0,
+      minRate: 0,
+      maxRate: 0,
+      totalFundings: 0,
+      avgAnnualized: 0,
+      trend: "stable",
+    };
+  }
+
+  const fundingRates = rates.map(r => r.fundingRate);
+  const avgRate = fundingRates.reduce((a, b) => a + b, 0) / fundingRates.length;
+  const minRate = Math.min(...fundingRates);
+  const maxRate = Math.max(...fundingRates);
+
+  // Calculate trend (compare first half vs second half)
+  const halfIndex = Math.floor(rates.length / 2);
+  const recentRates = fundingRates.slice(0, halfIndex);
+  const olderRates = fundingRates.slice(halfIndex);
+
+  const recentAvg = recentRates.reduce((a, b) => a + b, 0) / recentRates.length;
+  const olderAvg = olderRates.reduce((a, b) => a + b, 0) / olderRates.length;
+
+  let trend: "increasing" | "decreasing" | "stable";
+  const changePercent = Math.abs((recentAvg - olderAvg) / (olderAvg || 1));
+  if (changePercent > 0.1) {
+    trend = recentAvg > olderAvg ? "increasing" : "decreasing";
+  } else {
+    trend = "stable";
+  }
+
+  return {
+    avgRate,
+    minRate,
+    maxRate,
+    totalFundings: rates.length,
+    avgAnnualized: avgRate * 3 * 365,
+    trend,
+  };
+}
+
+/**
+ * Generate funding rate heatmap data
+ */
+export function generateFundingHeatmap(
+  rates: Array<{ symbol: string; rate: number; exchange: string }>
+): Map<string, { level: HeatLevel; color: string }> {
+  const heatmap = new Map<string, { level: HeatLevel; color: string }>();
+
+  for (const item of rates) {
+    const { level } = calculateHeatLevel({
+      fundingRate: item.rate,
+    });
+
+    const colors: Record<HeatLevel, string> = {
+      low: "#22c55e",      // Green
+      medium: "#eab308",   // Yellow
+      high: "#f97316",     // Orange
+      critical: "#ef4444", // Red
+    };
+
+    heatmap.set(`${item.exchange}-${item.symbol}`, {
+      level,
+      color: colors[level],
+    });
+  }
+
+  return heatmap;
+}
+
 // ==================== EXPORTS ====================
 
 export { EXCHANGE_FUNDING_CONFIGS };

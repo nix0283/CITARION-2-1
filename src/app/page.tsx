@@ -52,6 +52,9 @@ import { LFTBotPanel } from "@/components/bots/lft-bot-panel";
 import { ChatBot } from "@/components/chat/chat-bot";
 import { PositionsTable } from "@/components/dashboard/positions-table";
 import { HelpPanel } from "@/components/help/help-panel";
+import { JournalPanel } from "@/components/journal/journal-panel";
+import { NewsPanel } from "@/components/news/news-panel";
+import { BackupPanel } from "@/components/backup/backup-panel";
 import {
   LineChart,
   Line,
@@ -306,13 +309,13 @@ function DashboardContent() {
       case "analytics":
         return <AnalyticsView equityCurve={demoEquityCurve} performanceData={demoPerformanceData} timeRange={timeRange} onTimeRangeChange={setTimeRange} />;
       case "journal":
-        return <JournalView entries={demoJournalEntries} />;
+        return <JournalPanel />;
       case "portfolio":
         return <PortfolioView balances={demoExchangeBalances} />;
       case "funding":
         return <FundingView fundingRates={demoFundingRates} />;
       case "news":
-        return <NewsView news={demoNews} events={demoCalendarEvents} />;
+        return <NewsPanel />;
       case "chart":
         return (
           <div className="flex-1 min-h-0 rounded-lg border border-border bg-card overflow-hidden flex flex-col">
@@ -346,6 +349,8 @@ function DashboardContent() {
       // Bottom Menu Items - Using Real Functional Components
       case "workspace":
         return <WorkspacePanel />;
+      case "backup":
+        return <BackupPanel />;
       case "notifications":
         return <NotificationsPanel />;
       case "telegram":
@@ -1226,86 +1231,6 @@ function AnalyticsView({ equityCurve, performanceData, timeRange, onTimeRangeCha
 // ============================================
 // Journal View
 // ============================================
-
-interface JournalViewProps {
-  entries: DemoJournalEntry[];
-}
-
-function JournalView({ entries }: JournalViewProps) {
-  return (
-    <div className="flex flex-col h-full gap-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Trading Journal</h2>
-        <Button size="sm">
-          <BookOpen className="h-3.5 w-3.5 mr-1" />
-          New Entry
-        </Button>
-      </div>
-
-      <ScrollArea className="flex-1">
-        <div className="space-y-4">
-          {entries.map((entry) => (
-            <Card key={entry.id}>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-base">{entry.title}</CardTitle>
-                    <CardDescription>
-                      {entry.date.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
-                    </CardDescription>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant="outline"
-                      className={entry.pnl >= 0 ? "text-[#0ECB81] border-[#0ECB81]/30" : "text-[#F6465D] border-[#F6465D]/30"}
-                    >
-                      {formatCurrency(entry.pnl)}
-                    </Badge>
-                    <Badge variant="outline">{entry.winRate}% win</Badge>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground mb-3">{entry.content}</p>
-
-                {entry.lessons.length > 0 && (
-                  <div className="mb-2">
-                    <div className="text-xs font-medium text-[#0ECB81] mb-1">Lessons:</div>
-                    <ul className="text-xs text-muted-foreground list-disc list-inside">
-                      {entry.lessons.slice(0, 2).map((lesson, i) => (
-                        <li key={i}>{lesson}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {entry.mistakes.length > 0 && (
-                  <div>
-                    <div className="text-xs font-medium text-[#F6465D] mb-1">Mistakes:</div>
-                    <ul className="text-xs text-muted-foreground list-disc list-inside">
-                      {entry.mistakes.slice(0, 2).map((mistake, i) => (
-                        <li key={i}>{mistake}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </CardContent>
-              <CardFooter>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {entry.tags.map((tag) => (
-                    <Badge key={tag} variant="secondary" className="text-[10px]">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-              </CardFooter>
-            </Card>
-          ))}
-        </div>
-      </ScrollArea>
-    </div>
-  );
-}
 
 // ============================================
 // Reusable Components

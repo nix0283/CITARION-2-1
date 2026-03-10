@@ -51,6 +51,7 @@ import {
   Menu,
   BookOpen,
   Percent,
+  Database,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -186,6 +187,7 @@ const otherMenuItems: MenuItem[] = [
 
 const bottomMenuItems: MenuItem[] = [
   { id: "workspace", label: "Рабочая область", icon: FolderCode },
+  { id: "backup", label: "Резерв", icon: Database },
   { id: "notifications", label: "Уведомления", icon: Bell },
   { id: "telegram", label: "Telegram", icon: MessageSquare },
   { id: "alerts", label: "Алерты", icon: AlertCircle },

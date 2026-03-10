@@ -121,22 +121,34 @@ export default function RootLayout({
           <Toaster position="top-right" richColors />
         </ThemeProvider>
         
-        {/* PWA Registration */}
+        {/* PWA Registration - wrapped in try-catch for sandboxed environments */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js').then(
-                    function(registration) {
-                      console.log('SW registered: ', registration.scope);
-                    },
-                    function(error) {
-                      console.log('SW registration failed: ', error);
-                    }
-                  );
-                });
-              }
+              (function() {
+                try {
+                  if ('serviceWorker' in navigator) {
+                    window.addEventListener('load', function() {
+                      try {
+                        navigator.serviceWorker.register('/sw.js').then(
+                          function(registration) {
+                            console.log('SW registered: ', registration.scope);
+                          },
+                          function(error) {
+                            console.log('SW registration failed: ', error);
+                          }
+                        );
+                      } catch (e) {
+                        // Service worker access blocked in sandboxed environment
+                        console.log('SW access blocked (sandboxed environment)');
+                      }
+                    });
+                  }
+                } catch (e) {
+                  // navigator.serviceWorker access blocked
+                  console.log('SW not available in this environment');
+                }
+              })();
             `,
           }}
         />

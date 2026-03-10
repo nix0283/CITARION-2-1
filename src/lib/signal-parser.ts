@@ -16,6 +16,25 @@
 
 // ==================== TYPES ====================
 
+/**
+ * Entry target with weight for multi-entry DCA strategies
+ */
+export interface EntryTarget {
+  index: number;
+  price: number;
+  weight: number; // Percentage (0-100), all weights should sum to 100
+}
+
+/**
+ * Multi-entry configuration with weights
+ * Used for DCA and custom position sizing strategies
+ */
+export interface MultiEntryConfig {
+  targets: EntryTarget[];
+  totalWeight: number; // Should be 100 for valid config
+  strategy: "EVENLY_DIVIDED" | "CUSTOM_RATIOS" | "DECREASING" | "INCREASING" | "DCA";
+}
+
 export interface ParsedSignal {
   id?: number;
   symbol: string;
@@ -26,6 +45,10 @@ export interface ParsedSignal {
   marketType: "SPOT" | "FUTURES";
   entryPrices: number[];
   entryZone?: { min: number; max: number };
+  /** Multi-entry weights for DCA strategies - percentage per entry price */
+  entryWeights?: number[];
+  /** Full multi-entry configuration with targets */
+  multiEntryConfig?: MultiEntryConfig;
   stopLoss?: number;
   takeProfits: { price: number; percentage: number }[];
   leverage: number;
@@ -419,6 +442,319 @@ export function parseEntryPrices(text: string): {
   };
 }
 
+// ==================== MULTI-ENTRY WITH WEIGHTS PARSING ====================
+
+/**
+ * Parse multi-entry signals with custom weights for DCA strategies
+ * 
+ * Supports Cornix formats:
+ * 
+ * Format 1 - Indexed with weights:
+ * ```
+ * Entry Targets:
+ * 1) 67000 (50%)
+ * 2) 66500 (30%)
+ * 3) 66000 (20%)
+ * ```
+ * 
+ * Format 2 - Inline weights:
+ * ```
+ * Entry: 67000:50, 66500:30, 66000:20
+ * ```
+ * 
+ * Format 3 - Separate weights line:
+ * ```
+ * Entry: 67000, 66500, 66000
+ * Weights: 50, 30, 20
+ * ```
+ * 
+ * Format 4 - DCA notation:
+ * ```
+ * DCA Entry: 67000 (base), 66500 (1.5x), 66000 (2x)
+ * ```
+ * 
+ * Format 5 - Percentage after price:
+ * ```
+ * Entry: 67000 50%, 66500 30%, 66000 20%
+ * ```
+ * 
+ * @returns MultiEntryConfig if weights found, undefined otherwise
+ */
+export function parseMultiEntryWithWeights(text: string): MultiEntryConfig | undefined {
+  const cleanText = text.replace(/[\r\n]+/g, " ");
+  const targets: EntryTarget[] = [];
+  let strategy: MultiEntryConfig["strategy"] = "CUSTOM_RATIOS";
+
+  // ========================================
+  // FORMAT 1: Indexed with percentage
+  // "1) 67000 (50%)" or "1) 67000 - 50%" or "1) 67000: 50%"
+  // ========================================
+  const indexedWithPercent = cleanText.matchAll(
+    /(?:entry|ent|вход)?\s*(\d+)\s*[\)\.]?\s*:?\s*([\d,.]+)\s*(?:[-:]\s*)?\(?(\d+(?:\.\d+)?)\s*%?\)?/gi
+  );
+  
+  const indexedMap: Map<number, { price: number; weight: number }> = new Map();
+  
+  for (const match of indexedWithPercent) {
+    const index = parseInt(match[1]);
+    const price = parseFloat(match[2].replace(/,/g, ""));
+    const weight = parseFloat(match[3]);
+    
+    if (!isNaN(index) && !isNaN(price) && !isNaN(weight) && index >= 1 && index <= 20 && price > 0 && weight > 0) {
+      // Only consider if this looks like an entry (not TP)
+      const contextBefore = cleanText.substring(Math.max(0, match.index! - 50), match.index);
+      if (!/tp|тп|take.?profit|target|цель/i.test(contextBefore)) {
+        indexedMap.set(index, { price, weight });
+      }
+    }
+  }
+  
+  if (indexedMap.size > 1) {
+    for (const [index, data] of Array.from(indexedMap.entries()).sort((a, b) => a[0] - b[0])) {
+      targets.push({ index, price: data.price, weight: data.weight });
+    }
+  }
+
+  // ========================================
+  // FORMAT 2: Inline weights "price:weight" or "price weight%"
+  // "Entry: 67000:50, 66500:30, 66000:20" or "Entry: 67000 50%, 66500 30%"
+  // ========================================
+  if (targets.length === 0) {
+    // Match entry section
+    const entrySectionMatch = cleanText.match(
+      /(?:entry|ent|вход)\s*:?\s*([\d\s,.:;%]+?)(?=(?:tp|тп|take.?profit|stop|sl|стоп|leverage|lev|плечо|$))/i
+    );
+    
+    if (entrySectionMatch) {
+      const entryText = entrySectionMatch[1];
+      
+      // Pattern: "67000:50" or "67000 50%" or "67000:50%"
+      const inlineWeightMatches = entryText.matchAll(
+        /([\d,.]+)\s*[:\s]\s*(\d+(?:\.\d+)?)\s*%?/gi
+      );
+      
+      const inlineTargets: { price: number; weight: number }[] = [];
+      
+      for (const match of inlineWeightMatches) {
+        const price = parseFloat(match[1].replace(/,/g, ""));
+        const weight = parseFloat(match[2]);
+        
+        if (!isNaN(price) && !isNaN(weight) && price > 0 && weight > 0 && weight <= 100) {
+          inlineTargets.push({ price, weight });
+        }
+      }
+      
+      if (inlineTargets.length > 1) {
+        inlineTargets.forEach((t, i) => {
+          targets.push({ index: i + 1, price: t.price, weight: t.weight });
+        });
+      }
+    }
+  }
+
+  // ========================================
+  // FORMAT 3: Separate weights line
+  // "Entry: 67000, 66500, 66000"
+  // "Weights: 50, 30, 20" or "Entry weights: 50, 30, 20"
+  // ========================================
+  if (targets.length === 0) {
+    const weightsMatch = cleanText.match(
+      /(?:entry\s*)?weights?\s*:?\s*([\d\s,.]+?)(?=(?:tp|тп|take.?profit|stop|sl|стоп|leverage|lev|плечо|entry|вход|$))/i
+    );
+    
+    if (weightsMatch) {
+      const weightsText = weightsMatch[1];
+      const weights = weightsText.match(/[\d.]+/g)?.map(w => parseFloat(w)).filter(w => !isNaN(w) && w > 0) || [];
+      
+      if (weights.length > 1) {
+        // Find corresponding entry prices
+        const entryResult = parseEntryPrices(text);
+        const prices = entryResult.prices;
+        
+        if (prices.length === weights.length) {
+          prices.forEach((price, i) => {
+            targets.push({ index: i + 1, price, weight: weights[i] });
+          });
+        }
+      }
+    }
+  }
+
+  // ========================================
+  // FORMAT 4: DCA notation with multipliers
+  // "DCA Entry: 67000 (base), 66500 (1.5x), 66000 (2x)"
+  // ========================================
+  if (targets.length === 0) {
+    const dcaMatch = cleanText.match(/dca\s*(?:entry|ent|вход)?\s*:?\s*([\s\S]+?)(?=(?:tp|тп|take.?profit|stop|sl|стоп|leverage|lev|плечо|$))/i);
+    
+    if (dcaMatch) {
+      const dcaText = dcaMatch[1];
+      
+      // Match: price (multiplier) or price:multiplier
+      const dcaEntries = dcaText.matchAll(
+        /([\d,.]+)\s*[\(:]?\s*(\d+(?:\.\d+)?)\s*x\s*\)?/gi
+      );
+      
+      const dcaTargets: { price: number; multiplier: number }[] = [];
+      
+      for (const match of dcaEntries) {
+        const price = parseFloat(match[1].replace(/,/g, ""));
+        const multiplier = parseFloat(match[2]);
+        
+        if (!isNaN(price) && !isNaN(multiplier) && price > 0 && multiplier > 0) {
+          dcaTargets.push({ price, multiplier });
+        }
+      }
+      
+      if (dcaTargets.length > 1) {
+        // Convert multipliers to weights (normalize to 100%)
+        const totalMultiplier = dcaTargets.reduce((sum, t) => sum + t.multiplier, 0);
+        dcaTargets.forEach((t, i) => {
+          targets.push({
+            index: i + 1,
+            price: t.price,
+            weight: Math.round((t.multiplier / totalMultiplier) * 100 * 100) / 100
+          });
+        });
+        strategy = "DCA";
+      }
+    }
+  }
+
+  // ========================================
+  // FORMAT 5: Russian notation
+  // "Вход: 67000 (50%), 66500 (30%), 66000 (20%)"
+  // ========================================
+  if (targets.length === 0) {
+    const ruEntryMatch = cleanText.match(
+      /(?:вход|покупка|buy)\s*:?\s*([\d\s,.:%]+?)(?=(?:тп|tp|тейк|stop|sl|стоп|плечо|leverage|$))/i
+    );
+    
+    if (ruEntryMatch) {
+      const ruText = ruEntryMatch[1];
+      
+      // Match: price (percent%) 
+      const ruMatches = ruText.matchAll(
+        /([\d,.]+)\s*\((\d+(?:\.\d+)?)\s*%?\)/gi
+      );
+      
+      const ruTargets: { price: number; weight: number }[] = [];
+      
+      for (const match of ruMatches) {
+        const price = parseFloat(match[1].replace(/,/g, ""));
+        const weight = parseFloat(match[2]);
+        
+        if (!isNaN(price) && !isNaN(weight) && price > 0 && weight > 0) {
+          ruTargets.push({ price, weight });
+        }
+      }
+      
+      if (ruTargets.length > 1) {
+        ruTargets.forEach((t, i) => {
+          targets.push({ index: i + 1, price: t.price, weight: t.weight });
+        });
+      }
+    }
+  }
+
+  // ========================================
+  // VALIDATE AND RETURN
+  // ========================================
+  if (targets.length < 2) {
+    return undefined;
+  }
+
+  // Calculate total weight
+  const totalWeight = targets.reduce((sum, t) => sum + t.weight, 0);
+
+  // Validate weights sum to approximately 100%
+  if (totalWeight < 95 || totalWeight > 105) {
+    // Auto-normalize weights if they don't sum to 100%
+    const normalizedTargets = targets.map(t => ({
+      ...t,
+      weight: Math.round((t.weight / totalWeight) * 100 * 100) / 100
+    }));
+    
+    return {
+      targets: normalizedTargets,
+      totalWeight: 100,
+      strategy
+    };
+  }
+
+  // Detect strategy pattern
+  if (strategy === "CUSTOM_RATIOS") {
+    const weights = targets.map(t => t.weight);
+    const isEvenlyDivided = weights.every(w => Math.abs(w - weights[0]) < 1);
+    
+    if (isEvenlyDivided) {
+      strategy = "EVENLY_DIVIDED";
+    } else {
+      // Check if decreasing or increasing
+      const isDecreasing = weights.every((w, i) => i === 0 || w <= weights[i - 1]);
+      const isIncreasing = weights.every((w, i) => i === 0 || w >= weights[i - 1]);
+      
+      if (isDecreasing) strategy = "DECREASING";
+      if (isIncreasing) strategy = "INCREASING";
+    }
+  }
+
+  return {
+    targets,
+    totalWeight: Math.round(totalWeight * 100) / 100,
+    strategy
+  };
+}
+
+/**
+ * Extract entry weights as a simple array from parsed signal
+ * Useful for database storage
+ */
+export function extractEntryWeights(config: MultiEntryConfig): number[] {
+  return config.targets.map(t => t.weight);
+}
+
+/**
+ * Validate multi-entry configuration
+ */
+export function validateMultiEntryConfig(config: MultiEntryConfig): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (config.targets.length < 2) {
+    errors.push("At least 2 entry targets required for multi-entry");
+  }
+
+  if (config.targets.length > 10) {
+    errors.push("Maximum 10 entry targets allowed");
+  }
+
+  const totalWeight = config.targets.reduce((sum, t) => sum + t.weight, 0);
+  if (Math.abs(totalWeight - 100) > 1) {
+    errors.push(`Weights must sum to 100% (got ${totalWeight.toFixed(2)}%)`);
+  }
+
+  for (const target of config.targets) {
+    if (target.price <= 0) {
+      errors.push(`Invalid price at target ${target.index}`);
+    }
+    if (target.weight <= 0 || target.weight > 100) {
+      errors.push(`Invalid weight at target ${target.index} (must be 0-100)`);
+    }
+  }
+
+  // Check for duplicate prices
+  const prices = config.targets.map(t => t.price);
+  const uniquePrices = new Set(prices);
+  if (uniquePrices.size !== prices.length) {
+    errors.push("Duplicate entry prices detected");
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
 // ==================== TAKE PROFIT PARSING ====================
 
 /**
@@ -710,6 +1046,10 @@ export function parseSignal(text: string): ParsedSignal | null {
     const entryResult = parseEntryPrices(cleanText);
     const entryPrices = entryResult.prices;
 
+    // Parse multi-entry with weights (DCA strategies)
+    const multiEntryConfig = parseMultiEntryWithWeights(cleanText);
+    const entryWeights = multiEntryConfig ? extractEntryWeights(multiEntryConfig) : undefined;
+
     // Parse stop loss
     const stopLoss = parseStopLoss(cleanText);
 
@@ -759,6 +1099,7 @@ export function parseSignal(text: string): ParsedSignal | null {
     if (takeProfits.length > 0) confidence += 0.1;
     if (explicitDirection) confidence += 0.1;
     if (trailingConfig) confidence += 0.05; // Boost confidence for trailing config
+    if (multiEntryConfig) confidence += 0.05; // Boost confidence for multi-entry config
 
     return {
       symbol: coinPair.symbol,
@@ -769,6 +1110,8 @@ export function parseSignal(text: string): ParsedSignal | null {
       marketType,
       entryPrices,
       entryZone: entryResult.zone,
+      entryWeights,
+      multiEntryConfig,
       stopLoss,
       takeProfits,
       leverage,
@@ -960,9 +1303,20 @@ export function formatSignal(signal: ParsedSignal): string {
   if (signal.entryPrices.length > 0) {
     if (signal.entryZone) {
       lines.push(`<b>Entry Zone:</b> ${signal.entryZone.min} - ${signal.entryZone.max}`);
+    } else if (signal.entryWeights && signal.entryWeights.length > 0) {
+      lines.push(`<b>Entry Targets (Weighted):</b>`);
+      signal.entryPrices.forEach((price, i) => {
+        const weight = signal.entryWeights?.[i] || 0;
+        lines.push(`  ${i + 1}) ${price} (${weight}%)`);
+      });
     } else {
       lines.push(`<b>Entry:</b> ${signal.entryPrices.join(", ")}`);
     }
+  }
+
+  // Display multi-entry strategy if available
+  if (signal.multiEntryConfig) {
+    lines.push(`<b>Entry Strategy:</b> ${signal.multiEntryConfig.strategy}`);
   }
 
   if (signal.takeProfits.length > 0) {

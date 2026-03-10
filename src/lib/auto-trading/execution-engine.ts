@@ -200,6 +200,8 @@ export interface ExecutionResult {
   error?: string;
   errorCode?: string;
   warnings?: string[];
+  /** Weight percentage for multi-entry (0-100) */
+  weight?: number;
 }
 
 /**
@@ -553,6 +555,77 @@ export class ExecutionEngine {
     };
     
     return await client.createOrder(orderParams);
+  }
+
+  /**
+   * Execute multi-entry orders with weights (DCA strategy)
+   * Each entry price gets its own order with weighted position size
+   */
+  async executeMultiEntryOrders(
+    params: TradeEntryInput & { entryWeights: number[] }
+  ): Promise<ExecutionResult[]> {
+    const results: ExecutionResult[] = [];
+    const { signal, entryWeights } = params;
+
+    if (!entryWeights || entryWeights.length === 0) {
+      return [{
+        success: false,
+        error: 'No entry weights provided for multi-entry',
+        errorCode: 'NO_WEIGHTS',
+      }];
+    }
+
+    if (entryWeights.length !== signal.entryPrices.length) {
+      return [{
+        success: false,
+        error: `Weights count (${entryWeights.length}) doesn't match entry prices count (${signal.entryPrices.length})`,
+        errorCode: 'WEIGHTS_MISMATCH',
+      }];
+    }
+
+    // Normalize weights to sum to 100
+    const totalWeight = entryWeights.reduce((sum, w) => sum + w, 0);
+    const normalizedWeights = entryWeights.map(w => (w / totalWeight) * 100);
+
+    // Execute each entry as a separate order
+    for (let i = 0; i < signal.entryPrices.length; i++) {
+      const entryPrice = signal.entryPrices[i];
+      const weight = normalizedWeights[i];
+
+      // Skip zero-weight entries
+      if (weight <= 0) continue;
+
+      // Calculate weighted position size for this entry
+      const weightedParams: TradeEntryInput = {
+        ...params,
+        signal: {
+          ...signal,
+          entryPrices: [entryPrice],
+        },
+        overrideAmount: params.overrideAmount
+          ? (params.overrideAmount * weight) / 100
+          : undefined,
+      };
+
+      // Execute single entry
+      const result = await this.executeTrade(weightedParams);
+
+      results.push({
+        ...result,
+        entryPrice,
+        weight,
+      });
+
+      // If any entry fails, log but continue with others
+      if (!result.success) {
+        console.error(`[ExecutionEngine] Multi-entry ${i + 1} failed:`, result.error);
+      }
+
+      // Small delay between orders to avoid rate limits
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    return results;
   }
 
   /**
