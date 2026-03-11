@@ -170,7 +170,6 @@ The Bot Registry tracks all active bots and their capabilities.
 | TRND | Orion | Institutional | Trend following |
 | FCST | Vision | Institutional | Price forecasting |
 | RNG | Range Bot | Institutional | Range trading |
-| LMB | Lumibot | Institutional | AI assistant |
 | HFT | Helios | Frequency | High frequency trading |
 | MFT | Selene | Frequency | Medium frequency trading |
 | LFT | Atlas | Frequency | Low frequency trading |

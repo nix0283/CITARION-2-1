@@ -43,6 +43,18 @@ model User {
   apiKeys    ApiKey[]
 
   classifiedSignals ClassifiedSignal[]
+  
+  // Institutional Bots
+  spectrumBots    SpectrumBot[]
+  reedBots        ReedBot[]
+  architectBots   ArchitectBot[]
+  equilibristBots EquilibristBot[]
+  kronBots        KronBot[]
+  botPerformanceSummaries BotPerformanceSummary[]
+
+  // Notifications
+  notifications            Notification[]
+  notificationPreference   NotificationPreference?
 }
 
 model Session {
@@ -133,6 +145,13 @@ model Account {
   escortRequests    EscortRequest[]
   externalPositions ExternalPosition[]
   pendingRequests   PendingPositionRequest[]
+
+  // Institutional Bots
+  spectrumBots    SpectrumBot[]
+  reedBots        ReedBot[]
+  architectBots   ArchitectBot[]
+  equilibristBots EquilibristBot[]
+  kronBots        KronBot[]
 
   @@unique([userId, exchangeId, exchangeType])
 }
@@ -723,6 +742,17 @@ model GridBot {
   baseAtr            Float?
   rebalanceThreshold Float   @default(0.05) // 5%
   trailingGrid       Boolean @default(false)
+
+  // Dynamic Adjustment Settings (Task 5)
+  dynamicAdjustmentEnabled Boolean   @default(false) // Enable real-time grid adjustment
+  adjustmentInterval       Int        @default(60000) // Minimum interval between adjustments (ms)
+  maxAdjustmentThreshold   Float      @default(0.05) // Max price movement threshold before adjustment (5%)
+  lastAdjustmentAt         DateTime? // Last time grid was adjusted
+  adjustmentHistory        String?    // JSON array of adjustment history
+  currentGridUpper         Float?    // Current upper price (may differ from original after adjustments)
+  currentGridLower         Float?    // Current lower price (may differ from original after adjustments)
+  adjustmentPaused         Boolean   @default(false) // Is dynamic adjustment currently paused?
+  adjustmentPauseReason    String?   // Reason for pausing adjustment
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3169,4 +3199,601 @@ model RestoreRecord {
   updatedAt     DateTime @updatedAt
   
   @@index([status, createdAt])
+}
+
+// ==================== INSTITUTIONAL BOTS ====================
+
+// Spectrum Bot - Price Range/Pattern Recognition bot
+model SpectrumBot {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId    String?
+  account      Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  
+  name         String
+  isActive     Boolean  @default(false)
+  
+  // Core bot logic
+  algorithm    String   @default("SPECTRUM") // SPECTRUM = Price Range Recognition
+  
+  // Trading configuration
+  symbol       String   @default("BTCUSDT")
+  leverage     Float    @default(1)
+  maxPositionSize Float @default(100)
+  
+  // Performance tracking
+  totalProfit  Float    @default(0)
+  totalTrades  Int      @default(0)
+  winRate      Float    @default(0)
+  maxDrawdown  Float    @default(0)
+  
+  // Configuration
+  configJson   String?  @default("{}")
+  
+  // Status
+  status       String   @default("stopped") // stopped, running, paused, error
+  lastError    String?
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@index([userId, isActive])
+  @@index([userId, status])
+}
+
+// Reed Bot - Stationary Algorithm (mean reversion with statistical analysis)
+model ReedBot {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId    String?
+  account      Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  
+  name         String
+  isActive     Boolean  @default(false)
+  
+  // Core bot logic
+  algorithm    String   @default("STA") // STA = Stationary Algorithm
+  
+  // Trading configuration
+  symbol       String   @default("BTCUSDT")
+  leverage     Float    @default(1)
+  lookbackPeriod Int    @default(20)
+  deviationThreshold Float @default(2.0)
+  
+  // Performance tracking
+  totalProfit  Float    @default(0)
+  totalTrades  Int      @default(0)
+  winRate      Float    @default(0)
+  
+  // Configuration
+  configJson   String?  @default("{}")
+  
+  // Status
+  status       String   @default("stopped")
+  lastError    String?
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@index([userId, isActive])
+  @@index([userId, status])
+}
+
+// Architect Bot - Market Maker algorithm
+model ArchitectBot {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId    String?
+  account      Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  
+  name         String
+  isActive     Boolean  @default(false)
+  
+  // Core bot logic
+  algorithm    String   @default("MM") // MM = Market Maker
+  
+  // Trading configuration
+  symbol       String   @default("BTCUSDT")
+  leverage     Float    @default(1)
+  
+  // Inventory management
+  inventorySize   Float @default(0)
+  targetInventory Float @default(0)
+  maxInventory    Float @default(1000)
+  
+  // Spread settings
+  baseSpreadBps   Int   @default(10) // Basis points
+  minSpreadBps    Int   @default(5)
+  
+  // Performance tracking
+  totalProfit  Float    @default(0)
+  fillRate     Float    @default(0)
+  avgSpread    Float    @default(0)
+  totalTrades  Int      @default(0)
+  
+  // Configuration
+  configJson   String?  @default("{}")
+  
+  // Status
+  status       String   @default("stopped")
+  lastError    String?
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@index([userId, isActive])
+  @@index([userId, status])
+}
+
+// Equilibrist Bot - Mean Reversion strategy
+model EquilibristBot {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId    String?
+  account      Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  
+  name         String
+  isActive     Boolean  @default(false)
+  
+  // Core bot logic
+  algorithm    String   @default("MR") // MR = Mean Reversion
+  
+  // Trading configuration
+  symbol       String   @default("BTCUSDT")
+  leverage     Float    @default(1)
+  
+  // Strategy params
+  lookbackPeriod   Int     @default(14)
+  thresholdPercent Float   @default(5.0)
+  rsiPeriod        Int     @default(14)
+  rsiOverbought    Int     @default(70)
+  rsiOversold      Int     @default(30)
+  
+  // Performance tracking
+  totalProfit  Float    @default(0)
+  signalCount  Int      @default(0)
+  accuracy     Float    @default(0)
+  totalTrades  Int      @default(0)
+  
+  // Configuration
+  configJson   String?  @default("{}")
+  
+  // Status
+  status       String   @default("stopped")
+  lastError    String?
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@index([userId, isActive])
+  @@index([userId, status])
+}
+
+// Kron Bot - Trend Following strategy
+model KronBot {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId    String?
+  account      Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  
+  name         String
+  isActive     Boolean  @default(false)
+  
+  // Core bot logic
+  algorithm    String   @default("TRF") // TRF = Trend Following
+  
+  // Trading configuration
+  symbol       String   @default("BTCUSDT")
+  leverage     Float    @default(1)
+  
+  // Trend detection
+  maFastLength    Int     @default(12)
+  maSlowLength    Int     @default(26)
+  signalLineLength Int    @default(9)
+  adxThreshold    Float   @default(25.0)
+  
+  // Performance tracking
+  totalProfit     Float    @default(0)
+  trendAccuracy   Float    @default(0)
+  drawdown        Float    @default(0)
+  totalTrades     Int      @default(0)
+  
+  // Configuration
+  configJson   String?  @default("{}")
+  
+  // Status
+  status       String   @default("stopped")
+  lastError    String?
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@index([userId, isActive])
+  @@index([userId, status])
+}
+
+// Bot Performance Summary - Aggregated metrics for all bot types
+model BotPerformanceSummary {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  botType         String   // GRID, DCA, BB, SPECTRUM, REED, ARCHITECT, EQUILIBRIST, KRON, etc.
+  botInstanceId   String   // Links to specific bot instance
+  
+  // Aggregated metrics
+  totalSignals    Int      @default(0)
+  successfulSignals Int    @default(0)
+  failedSignals   Int      @default(0)
+  accuracy        Float    @default(0)
+  
+  // Financial metrics
+  avgPnl          Float    @default(0)
+  avgPnlPercent   Float    @default(0)
+  totalPnl        Float    @default(0)
+  maxDrawdown     Float    @default(0)
+  
+  // Condition analysis
+  bestConditions  String?  // JSON: ["high_volume", "low_volatility"]
+  worstConditions String?  // JSON: ["whipsaw", "gap_risk"]
+  
+  // Time tracking
+  totalRuntimeHours Float  @default(0)
+  lastTradeAt     DateTime?
+  
+  lastUpdated     DateTime @default(now())
+  
+  @@unique([botType, botInstanceId])
+  @@index([userId, botType])
+}
+
+// ==================== NOTIFICATIONS ====================
+
+// Notification history and tracking
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Notification type and category
+  type      String   // ORDER_PLACED, ORDER_FILLED, POSITION_OPENED, POSITION_CLOSED, TP_HIT, SL_HIT, ERROR, ALERT, DAILY_SUMMARY
+  category  String   // TRADE, SYSTEM, ALERT, MARKETING
+  
+  // Content
+  title     String
+  message   String
+  data      String?  // JSON: additional data specific to notification type
+
+  // Priority and delivery
+  priority  String   @default("normal") // critical, high, normal, low
+
+  // Channel delivery status
+  telegramSent    Boolean   @default(false)
+  telegramSentAt  DateTime?
+  inAppSent       Boolean   @default(false)
+  inAppSentAt     DateTime?
+  emailSent       Boolean   @default(false)
+  emailSentAt     DateTime?
+
+  // User interaction
+  read            Boolean   @default(false)
+  readAt          DateTime?
+  clicked         Boolean   @default(false)
+  clickedAt       DateTime?
+
+  // Related entities
+  tradeId         String?
+  positionId      String?
+  signalId        String?
+
+  // Error tracking
+  sendError       String?
+
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([userId, read])
+  @@index([type, createdAt])
+  @@index([priority, createdAt])
+}
+
+// User notification preferences
+model NotificationPreference {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Channel toggles
+  telegramEnabled   Boolean @default(true)
+  inAppEnabled      Boolean @default(true)
+  emailEnabled      Boolean @default(false) // Email disabled by default (stub)
+
+  // Trade notifications
+  orderPlaced       Boolean @default(true)
+  orderFilled       Boolean @default(true)
+  positionOpened    Boolean @default(true)
+  positionClosed    Boolean @default(true)
+  tpHit             Boolean @default(true)
+  slHit             Boolean @default(true)
+  
+  // System notifications
+  systemErrors      Boolean @default(true)
+  systemAlerts      Boolean @default(true)
+  
+  // Summary notifications
+  dailySummary      Boolean @default(false)
+  weeklySummary     Boolean @default(false)
+  
+  // Rate limiting settings
+  maxNotificationsPerHour Int      @default(20)
+  quietHoursStart         String?  // e.g., "22:00"
+  quietHoursEnd           String?  // e.g., "08:00"
+  quietHoursEnabled       Boolean  @default(false)
+
+  // Minimum priority to notify
+  minPriority       String  @default("normal") // critical, high, normal, low
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// Notification templates for customization
+model NotificationTemplate {
+  id          String   @id @default(cuid())
+  
+  // Template identification
+  type        String   @unique // ORDER_PLACED, ORDER_FILLED, etc.
+  category    String   // TRADE, SYSTEM, ALERT
+
+  // Template content with placeholders
+  title       String   // e.g., "Order Placed: {{symbol}} {{direction}}"
+  message     String   // e.g., "Your {{direction}} order for {{symbol}} has been placed at {{price}}"
+  
+  // Channel-specific templates
+  telegramTemplate String?  // Markdown-formatted template for Telegram
+  emailSubject     String?  // Subject line for email
+  emailBody        String?  // HTML body for email
+
+  // Template metadata
+  isActive    Boolean  @default(true)
+  description String?  // Human-readable description
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type, isActive])
+}
+
+// ==================== LOGOS SELF-LEARNING MODELS ====================
+
+// LogosSignalOutcome - Tracks prediction vs actual outcome for signals
+model LogosSignalOutcome {
+  id            String   @id @default(cuid())
+  
+  // Signal identification
+  signalId      String   @unique // Reference to the aggregated signal
+  timestamp     DateTime @default(now())
+  
+  // Market context
+  symbol        String
+  exchange      String   @default("binance")
+  direction     String   // LONG, SHORT, NEUTRAL
+  
+  // Prediction details
+  predictedConfidence Float
+  predictedEntry      Float?
+  predictedSL         Float?
+  predictedTP         Float?
+  consensus           Float
+  participatingBots   String  // JSON array of bot codes
+  
+  // Actual outcome
+  actualEntry   Float?
+  actualExit    Float?
+  exitTime      DateTime?
+  outcome       String?  // WIN, LOSS, BREAKEVEN, PENDING
+  pnlPercent    Float    @default(0)
+  pnlAbsolute   Float    @default(0)
+  
+  // Market conditions at signal time
+  marketRegime  String?  // trending, ranging, volatile
+  volatility    Float?
+  volume        Float?
+  
+  // Contribution tracking
+  contributions String? // JSON: [{botCode, direction, confidence, weight, contribution}]
+  
+  // Learning flags
+  processed     Boolean  @default(false)
+  learned       Boolean  @default(false)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([symbol, timestamp])
+  @@index([outcome, processed])
+  @@index([timestamp])
+}
+
+// LogosBotPerformance - Per-bot performance metrics for LOGOS
+model LogosBotPerformance {
+  id              String   @id @default(cuid())
+  botCode         String   @unique
+  
+  // Overall metrics
+  totalSignals    Int      @default(0)
+  correctSignals  Int      @default(0)
+  incorrectSignals Int     @default(0)
+  neutralSignals  Int      @default(0)
+  
+  // Accuracy metrics
+  overallAccuracy Float    @default(0.5)
+  longAccuracy    Float    @default(0.5)
+  shortAccuracy   Float    @default(0.5)
+  
+  // Performance by direction
+  longSignals     Int      @default(0)
+  shortSignals    Int      @default(0)
+  correctLongs    Int      @default(0)
+  correctShorts   Int      @default(0)
+  
+  // Confidence calibration
+  avgConfidence   Float    @default(0.5)
+  confidenceCalibration Float @default(1.0) // Ratio of predicted vs actual
+  
+  // Weight tracking
+  currentWeight   Float    @default(1.0)
+  previousWeight  Float    @default(1.0)
+  weightHistory   String?  // JSON array of weight changes
+  
+  // Performance by regime
+  trendingAccuracy Float   @default(0.5)
+  rangingAccuracy  Float   @default(0.5)
+  volatileAccuracy Float   @default(0.5)
+  
+  // Performance by symbol (top performers)
+  topSymbols      String?  // JSON: [{symbol, accuracy, count}]
+  worstSymbols    String?  // JSON: [{symbol, accuracy, count}]
+  
+  // Rolling metrics (last N signals)
+  rollingAccuracy Float    @default(0.5)
+  rollingWindow   String?  // JSON array of recent outcomes
+  
+  // Degradation detection
+  degradationScore Float   @default(0)
+  lastDegradationCheck DateTime?
+  
+  // Timestamps
+  lastSignalTime  DateTime?
+  lastOutcomeTime DateTime?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([botCode])
+  @@index([overallAccuracy])
+}
+
+// LogosLearningConfig - Configuration for the learning system
+model LogosLearningConfig {
+  id              String   @id @default("logos_learning_config")
+  
+  // Weight adjustment settings
+  weightAdjustmentRate Float @default(0.02) // How much to adjust weight per outcome
+  minBotWeight        Float @default(0.1)
+  maxBotWeight        Float @default(2.0)
+  weightSmoothing     Float @default(0.3) // EMA smoothing factor
+  
+  // Rolling window settings
+  rollingWindowSize   Int    @default(50)  // Number of signals for rolling metrics
+  degradationThreshold Float @default(0.15) // Accuracy drop threshold
+  degradationWindow   Int    @default(20)  // Window for degradation detection
+  
+  // A/B Testing settings
+  abTestingEnabled    Boolean @default(true)
+  abTestSampleSize    Int     @default(100)
+  abTestConfidenceLevel Float @default(0.95)
+  
+  // Feedback loop settings
+  minSamplesForAdjustment Int @default(10)
+  confidenceThreshold Float @default(0.7)
+  
+  // Category weights (base weights for bot categories)
+  operationalWeight   Float @default(1.0)
+  institutionalWeight Float @default(1.2)
+  frequencyWeight     Float @default(0.9)
+  
+  // Learning flags
+  autoRecalibration   Boolean @default(true)
+  recalibrationInterval Int @default(24) // Hours
+  
+  // Last calibration
+  lastCalibration     DateTime?
+  calibrationHistory  String? // JSON array of calibration events
+  
+  // Version
+  version             Int    @default(1)
+  
+  updatedAt           DateTime @updatedAt
+}
+
+// LogosABTest - A/B testing for strategy variations
+model LogosABTest {
+  id              String   @id @default(cuid())
+  
+  // Test identification
+  testName        String
+  testType        String   // WEIGHT_VARIATION, THRESHOLD_VARIATION, ENSEMBLE_VARIATION
+  status          String   @default("RUNNING") // RUNNING, COMPLETED, CANCELLED
+  
+  // Variants
+  variantA        String   // JSON: configuration for variant A
+  variantB        String   // JSON: configuration for variant B
+  
+  // Sample tracking
+  variantASamples Int      @default(0)
+  variantBSamples Int      @default(0)
+  
+  // Results
+  variantAWins    Int      @default(0)
+  variantALosses  Int      @default(0)
+  variantAPnl     Float    @default(0)
+  variantAAccuracy Float   @default(0)
+  
+  variantBWins    Int      @default(0)
+  variantBLosses  Int      @default(0)
+  variantBPnl     Float    @default(0)
+  variantBAccuracy Float   @default(0)
+  
+  // Statistical significance
+  pValue          Float?
+  significanceReached Boolean @default(false)
+  
+  // Timing
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+  
+  // Winning variant
+  winningVariant  String?  // A, B, or NULL (no significant difference)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([status, startedAt])
+}
+
+// LogosFeedbackEntry - Individual feedback entries for pattern analysis
+model LogosFeedbackEntry {
+  id              String   @id @default(cuid())
+  outcomeId       String   // Reference to LogosSignalOutcome
+  
+  // Pattern identification
+  patternType     String?  // WINNING, LOSING
+  patternSignature String? // Hash of pattern characteristics
+  
+  // Pattern characteristics
+  botAgreement    Float?   // How many bots agreed
+  confidenceRange Float?   // Range of confidences
+  regimeMatch     Boolean? // Did regime match expected
+  
+  // Improvement suggestions
+  suggestion      String?  // JSON: improvement suggestions
+  suggestionType  String?  // WEIGHT_ADJUST, THRESHOLD_CHANGE, REGIME_FILTER
+  
+  // Implementation status
+  implemented     Boolean  @default(false)
+  implementedAt   DateTime?
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([patternType, createdAt])
+  @@index([outcomeId])
 }

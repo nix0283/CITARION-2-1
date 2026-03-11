@@ -1,7 +1,7 @@
 #!/bin/bash
 # CITARION Python Microservices Startup Script
 # Usage: ./start-services.sh [service-name]
-# service-name: lumibot | ml | rl | all (default: all)
+# service-name: ml | rl | all (default: all)
 
 set -e
 
@@ -16,7 +16,6 @@ PROJECT_ROOT="/home/z/my-project"
 
 # Configuration
 SERVICES=(
-    "lumibot:3004:${PROJECT_ROOT}/lumibot-service"
     "ml:3006:${PROJECT_ROOT}/mini-services/ml-service"
     "rl:3007:${PROJECT_ROOT}/mini-services/rl-service"
 )
@@ -129,9 +128,6 @@ stop_all() {
 
 # Main logic
 case "$1" in
-    "lumibot")
-        start_service "lumibot" "3004" "${PROJECT_ROOT}/lumibot-service"
-        ;;
     "ml")
         start_service "ml" "3006" "${PROJECT_ROOT}/mini-services/ml-service"
         ;;
@@ -148,7 +144,7 @@ case "$1" in
         show_status
         ;;
     *)
-        echo "Usage: $0 {lumibot|ml|rl|all|stop|status}"
+        echo "Usage: $0 {ml|rl|all|stop|status}"
         exit 1
         ;;
 esac

@@ -44,6 +44,11 @@ export interface GridBotConfig {
   rebalanceEnabled: boolean;
   rebalanceThreshold: number;
   
+  // Dynamic Adjustment Settings
+  dynamicAdjustmentEnabled: boolean;
+  adjustmentInterval: number;
+  maxAdjustmentThreshold: number;
+  
   // Metadata
   createdAt: Date;
   updatedAt: Date;
@@ -160,7 +165,16 @@ export type GridBotEventType =
   | 'TAKE_PROFIT_TRIGGERED'
   | 'MAX_DRAWDOWN_REACHED'
   | 'ERROR'
-  | 'PRICE_UPDATE';
+  | 'PRICE_UPDATE'
+  // Dynamic Adjustment Events
+  | 'DYNAMIC_ADJUSTMENT_TRIGGERED'
+  | 'DYNAMIC_ADJUSTMENT_COMPLETED'
+  | 'GRID_REBALANCED_DYNAMIC'
+  | 'GRID_TRAILED'
+  | 'VOLATILITY_ADJUSTMENT'
+  | 'SR_ADJUSTMENT'
+  | 'ADJUSTMENT_PAUSED'
+  | 'ADJUSTMENT_RESUMED';
 
 // ==================== TRADE ====================
 

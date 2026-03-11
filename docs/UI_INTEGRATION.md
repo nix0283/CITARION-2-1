@@ -67,7 +67,7 @@ This document describes the UI integration of Frequency Bot Panel, ML Filtering 
 |----------|-------------|------|
 | **Main** | Core functionality | Dashboard, Chart, Trading, Strategy Lab, Hyperopt, ML Filter |
 | **Operational** | Market-making and scaling strategies | MESH (Grid), SCALE (DCA), BAND (BB) |
-| **Institutional** | Advanced trading strategies | PND (Argus), TRND (Orion), FCST (Vision), RNG (Range), LMB (Lumibot) |
+| **Institutional** | Advanced trading strategies | PND (Argus), TRND (Orion), FCST (Vision), RNG (Range) |
 | **Frequency** | Time-based trading strategies | HFT (Helios), MFT (Selene), LFT (Atlas), FREQ Panel |
 
 ### Menu Items

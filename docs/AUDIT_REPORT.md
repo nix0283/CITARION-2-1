@@ -67,7 +67,6 @@
 ├── prisma/
 │   └── schema.prisma           # 30 database models
 ├── docs/                       # 52 documentation files
-├── lumibot-service/            # Python Lumibot service
 ├── iaf-service/                # IAF Python service
 ├── mini-services/              # Price service
 └── monitoring/                 # Prometheus + Grafana
@@ -278,14 +277,7 @@
 | **Проблемы** | Имя не соответствует другим ботам |
 | **Рекомендации** | Переименовать в "Canis" или "Lycaon" |
 
-#### Lumi — AI-ассистент
-| Параметр | Значение |
-|----------|----------|
-| **Файлы** | `src/lib/lumibot/`, `lumibot-service/` |
-| **Движок** | Python Lumibot + FastAPI |
-| **Статус** | ❌ NOT WORKING |
-| **Проблемы** | Сервис не запущен (порт 8001) |
-| **Решение** | `cd lumibot-service && docker-compose up -d` |
+
 
 ### 0.2.5. Сводная таблица ботов
 
@@ -307,7 +299,6 @@
 | MFT | Selene | ⚠️ Partial | TypeScript | ❌ | Medium |
 | LFT | Atlas | ⚠️ Partial | TypeScript | ❌ | Medium |
 | LOG | Logos | ✅ Working | TypeScript | ✅ | - |
-| LMB | Lumi | ❌ Broken | Python Lumibot | ⚠️ | Critical |
 | WOLF | WolfBot | ✅ Working | Port Python | ⚠️ | Low |
 
 ---
@@ -470,10 +461,10 @@
 
 ┌─────────────────────────────────────────────────────────────┐
 │                 MICROSERVICES (NOT RUNNING)                  │
-│  ┌─────────────────┐  ┌─────────────────┐                   │
-│  │ Lumibot Service │  │   IAF Service   │                   │
-│  │  (Python:8001)  │  │  (Python)       │                   │
-│  └─────────────────┘  └─────────────────┘                   │
+│  ┌─────────────────┐                                        │
+│  │   IAF Service   │                                        │
+│  │  (Python)       │                                        │
+│  └─────────────────┘                                        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -508,44 +499,7 @@
 
 ## 0.7. ПРОБЛЕМНЫЕ МЕСТА
 
-### 0.7.1. Lumibot не работает — детальный анализ
-
-**Причина:**
-```
-Lumibot status error: TypeError: fetch failed
-  at async LumibotClient.request (src/lib/lumibot/client.ts:47:24)
-  cause: AggregateError: code: 'ECONNREFUSED'
-```
-
-**Диагностика:**
-1. Lumibot service слушает порт 8001
-2. Next.js пытается подключиться к localhost:8001
-3. Сервис не запущен
-
-**Решение:**
-
-```bash
-# Вариант 1: Docker
-cd lumibot-service && docker-compose up -d
-
-# Вариант 2: Прямой запуск
-cd lumibot-service && pip install -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port 8001
-
-# Вариант 3: Добавить в package.json scripts
-"lumibot": "cd lumibot-service && uvicorn main:app --host 0.0.0.0 --port 8001"
-```
-
-**Код для автоматического запуска:**
-```json
-// package.json
-{
-  "scripts": {
-    "dev:all": "concurrently \"bun run dev\" \"cd lumibot-service && uvicorn main:app --port 8001\""
-  }
-}
-```
-
-### 0.7.2. Другие неработающие компоненты
+### 0.7.1. Другие неработающие компоненты
 
 | Компонент | Проблема | Решение |
 |-----------|----------|---------|
@@ -575,7 +529,7 @@ cd lumibot-service && pip install -r requirements.txt && uvicorn main:app --host
 
 | Приоритет | Компонент | Задача | Оценка времени |
 |-----------|-----------|--------|----------------|
-| **P0** | Lumibot | Запустить сервис | 1 час |
+
 | **P0** | UI | Добавить версию платформы | 30 мин |
 | **P1** | Institutional Bots | Завершить реализацию | 2-3 дня |
 | **P1** | Orchestration | Добавить Event Bus | 1 день |
@@ -604,18 +558,16 @@ cd lumibot-service && pip install -r requirements.txt && uvicorn main:app --host
 **CITARION** — это амбициозный проект с хорошей базовой архитектурой, но требующий значительной доработки для достижения институционального уровня.
 
 **Ключевые блокеры:**
-1. Lumibot сервис не запущен
-2. Нет оркестрации между ботами
-3. UI не соответствует требованиям (Cornix-like)
-4. База данных не готова для production
+1. Нет оркестрации между ботами
+2. UI не соответствует требованиям (Cornix-like)
+3. База данных не готова для production
 
 **Рекомендуемый порядок действий:**
-1. Запустить Lumibot (P0)
-2. Добавить версию платформы в UI (P0)
-3. Создать Orchestration Layer (P1)
-4. Завершить Institutional Bots (P1)
-5. Провести редизайн UI (P1)
-6. Мигрировать на PostgreSQL (P2)
+1. Добавить версию платформы в UI (P0)
+2. Создать Orchestration Layer (P1)
+3. Завершить Institutional Bots (P1)
+4. Провести редизайн UI (P1)
+5. Мигрировать на PostgreSQL (P2)
 
 ---
 

@@ -126,7 +126,6 @@ All Python microservices used `allow_origins=["*"]` with `allow_credentials=True
 ### Updated Services
 - `mini-services/rl-service/main.py` (Port 3007)
 - `mini-services/ml-service/main.py` (Port 3006)
-- `lumibot-service/main.py`
 - `iaf-service/api/__init__.py`
 
 ### Configuration
@@ -272,7 +271,6 @@ Single-user mode created default user without authentication.
 | `src/app/api/trade/close-all/route.ts` | Added authentication |
 | `mini-services/rl-service/main.py` | Fixed CORS |
 | `mini-services/ml-service/main.py` | Fixed CORS |
-| `lumibot-service/main.py` | Fixed CORS |
 | `iaf-service/api/__init__.py` | Fixed CORS |
 
 ---

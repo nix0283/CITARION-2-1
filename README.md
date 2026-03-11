@@ -135,7 +135,6 @@ Open your browser and navigate to the **Preview Panel** on the right side of thi
 | **Kron Bot** | Kronos time-based strategies | Indirect (via LOGOS) | All 5 exchanges |
 | **Architect Bot** | Strategy builder & backtester | Indirect (via LOGOS) | All 5 exchanges |
 | **Equilibrist Bot** | Balance-based strategies | Indirect (via LOGOS) | All 5 exchanges |
-| **Lumibot** | Lumibot framework integration | Indirect (via LOGOS) | All 5 exchanges |
 | **Logos Bot** | Self-learning AI meta bot | ✅ Core (ML-weighted) | All 5 exchanges |
 
 ---

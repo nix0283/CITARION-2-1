@@ -6,9 +6,26 @@
  * then produces a unified trading decision.
  * 
  * Named after the Greek word for "reason" or "logic".
+ * 
+ * Features:
+ * - Signal aggregation with weighted voting
+ * - Automatic strategy switching based on market conditions
+ * - Performance tracking and adaptation
  */
 
 import { getEventBus, TOPICS, type BotCode, type AnalyticsEvent } from '../orchestration'
+import {
+  StrategySwitcher,
+  type StrategyProfile,
+  type StrategySwitcherConfig,
+  type StrategySwitchEvent,
+  DEFAULT_STRATEGY_SWITCHER_CONFIG,
+} from './strategy-switcher'
+import {
+  type MarketRegime,
+  type MarketRegimeType,
+  type Candle,
+} from './market-regime'
 
 // ============================================================================
 // TYPES
@@ -22,7 +39,7 @@ export const LOGOS_BOT_METADATA = {
   name: 'Logos',
   fullName: 'Logos Meta Bot - Signal Aggregator',
   category: 'meta' as const,
-  description: 'Meta bot for signal aggregation and consensus building',
+  description: 'Meta bot for signal aggregation and consensus building with automatic strategy switching',
   frequency: 'variable' as const,
   latencyTarget: 500000, // 500ms
   exchanges: ['binance', 'bybit', 'okx', 'bitget', 'bingx'],
@@ -33,6 +50,8 @@ export const LOGOS_BOT_METADATA = {
     'confidence_calibration',
     'conflict_resolution',
     'performance_tracking',
+    'auto_strategy_switching',
+    'market_regime_detection',
   ],
   riskLevel: 'conservative' as const,
 }
@@ -179,6 +198,23 @@ export const DEFAULT_AGGREGATION_CONFIG: AggregationConfig = {
   decayRate: 0.01,
 }
 
+/**
+ * Extended engine configuration with strategy switching
+ */
+export interface LOGOSEngineConfig extends AggregationConfig {
+  // Strategy switching settings
+  enableStrategySwitching: boolean
+  strategySwitcherConfig?: Partial<StrategySwitcherConfig>
+}
+
+/**
+ * Default engine configuration
+ */
+export const DEFAULT_LOGOS_ENGINE_CONFIG: LOGOSEngineConfig = {
+  ...DEFAULT_AGGREGATION_CONFIG,
+  enableStrategySwitching: true,
+}
+
 // ============================================================================
 // SIGNAL AGGREGATOR
 // ============================================================================
@@ -190,10 +226,32 @@ class SignalAggregator {
   private signals: Map<string, IncomingSignal[]> = new Map()
   private performances: Map<BotCode, BotPerformance> = new Map()
   private config: AggregationConfig
+  private botWeightsOverride: Map<BotCode, number> | null = null
 
   constructor(config: AggregationConfig = DEFAULT_AGGREGATION_CONFIG) {
     this.config = config
     this.initializePerformances()
+  }
+
+  /**
+   * Set bot weight overrides from strategy switcher
+   */
+  setBotWeightsOverride(weights: Map<BotCode, number>): void {
+    this.botWeightsOverride = weights
+  }
+
+  /**
+   * Clear bot weight overrides
+   */
+  clearBotWeightsOverride(): void {
+    this.botWeightsOverride = null
+  }
+
+  /**
+   * Update aggregation config (e.g., from strategy profile)
+   */
+  updateConfig(config: Partial<AggregationConfig>): void {
+    this.config = { ...this.config, ...config }
   }
 
   /**
@@ -277,6 +335,36 @@ class SignalAggregator {
   private calculateWeight(signal: IncomingSignal): number {
     let weight = 1.0
 
+    // Check for strategy-based weight override first
+    if (this.botWeightsOverride) {
+      const overrideWeight = this.botWeightsOverride.get(signal.botCode)
+      if (overrideWeight !== undefined) {
+        weight = overrideWeight
+        
+        // Still apply confidence weighting
+        if (this.config.confidenceWeighting) {
+          weight *= signal.confidence
+        }
+        
+        // Still apply performance weighting
+        if (this.config.performanceWeighting) {
+          const perf = this.performances.get(signal.botCode)
+          if (perf) {
+            weight *= perf.accuracy
+          }
+        }
+        
+        // Still apply time decay
+        if (this.config.signalDecay) {
+          const age = (Date.now() - signal.timestamp) / 1000
+          weight *= Math.exp(-this.config.decayRate * age)
+        }
+        
+        return weight
+      }
+    }
+
+    // Standard weighting (no override)
     // Category weight
     const category = this.getBotCategory(signal.botCode)
     weight *= this.config.categoryWeights[category]
@@ -491,14 +579,18 @@ class SignalAggregator {
  */
 export class LOGOSEngine {
   private aggregator: SignalAggregator
+  private strategySwitcher: StrategySwitcher
   private eventBus = getEventBus()
   private subscriptionId: string | null = null
   private status: 'idle' | 'running' | 'paused' = 'idle'
-  private config: AggregationConfig
+  private config: LOGOSEngineConfig
 
-  constructor(config: Partial<AggregationConfig> = {}) {
-    this.config = { ...DEFAULT_AGGREGATION_CONFIG, ...config }
+  constructor(config: Partial<LOGOSEngineConfig> = {}) {
+    this.config = { ...DEFAULT_LOGOS_ENGINE_CONFIG, ...config }
     this.aggregator = new SignalAggregator(this.config)
+    this.strategySwitcher = new StrategySwitcher(
+      this.config.strategySwitcherConfig || DEFAULT_STRATEGY_SWITCHER_CONFIG
+    )
   }
 
   /**
@@ -514,6 +606,7 @@ export class LOGOSEngine {
 
     this.status = 'running'
     console.log('[LOGOS] Engine started, listening for signals')
+    console.log('[LOGOS] Strategy switching enabled:', this.config.enableStrategySwitching)
 
     // Register bot
     this.eventBus.registerBot({
@@ -566,7 +659,61 @@ export class LOGOSEngine {
     const aggregated = this.aggregator.aggregate(signal.symbol, signal.exchange)
     
     if (aggregated && aggregated.direction !== 'NEUTRAL') {
-      this.publishAggregatedSignal(aggregated)
+      // Apply strategy-based risk parameters
+      const adjustedSignal = this.applyRiskParameters(aggregated)
+      this.publishAggregatedSignal(adjustedSignal)
+    }
+  }
+
+  /**
+   * Apply risk parameters from current strategy profile
+   */
+  private applyRiskParameters(signal: AggregatedSignal): AggregatedSignal {
+    if (!this.config.enableStrategySwitching) {
+      return signal
+    }
+
+    const riskParams = this.strategySwitcher.getRiskParams()
+    const behavior = this.strategySwitcher.getBehavior()
+
+    // Adjust stop loss and take profit
+    const entryPrice = signal.entryPrice
+    const direction = signal.direction === 'LONG' ? 1 : -1
+    
+    // Calculate adjusted SL/TP
+    let stopLoss = signal.stopLoss
+    let takeProfit = signal.takeProfit
+    
+    if (behavior.useTightStops) {
+      // Tighten stops
+      const riskDistance = Math.abs(entryPrice - signal.stopLoss)
+      stopLoss = direction === 1 
+        ? entryPrice - riskDistance * 0.8 
+        : entryPrice + riskDistance * 0.8
+    }
+    
+    // Apply multipliers
+    const riskDistance = Math.abs(entryPrice - stopLoss)
+    const rewardDistance = Math.abs(takeProfit - entryPrice)
+    
+    stopLoss = direction === 1
+      ? entryPrice - riskDistance * riskParams.stopLossMultiplier
+      : entryPrice + riskDistance * riskParams.stopLossMultiplier
+    
+    takeProfit = direction === 1
+      ? entryPrice + rewardDistance * riskParams.takeProfitMultiplier
+      : entryPrice - rewardDistance * riskParams.takeProfitMultiplier
+
+    // Calculate new R:R
+    const risk = Math.abs(entryPrice - stopLoss)
+    const reward = Math.abs(takeProfit - entryPrice)
+    const riskRewardRatio = risk > 0 ? reward / risk : 0
+
+    return {
+      ...signal,
+      stopLoss,
+      takeProfit,
+      riskRewardRatio,
     }
   }
 
@@ -618,13 +765,148 @@ export class LOGOSEngine {
   }
 
   /**
+   * Update market data for strategy switching
+   */
+  updateMarketData(
+    symbol: string,
+    exchange: string,
+    candles: Candle[]
+  ): {
+    switched: boolean
+    regime: MarketRegime | null
+    profile: StrategyProfile | null
+    switchEvent?: StrategySwitchEvent
+  } {
+    if (!this.config.enableStrategySwitching) {
+      return {
+        switched: false,
+        regime: null,
+        profile: null,
+      }
+    }
+
+    const result = this.strategySwitcher.update(symbol, exchange, candles)
+
+    if (result.switched && result.regime) {
+      // Apply new strategy weights to aggregator
+      const botWeights = this.strategySwitcher.getAllBotWeights()
+      const weightsMap = new Map(Object.entries(botWeights) as [BotCode, number][])
+      this.aggregator.setBotWeightsOverride(weightsMap)
+
+      // Update aggregation config from strategy profile
+      const profile = this.strategySwitcher.getCurrentProfile()
+      this.aggregator.updateConfig({
+        minSignals: profile.riskParams.aggregationMinSignals,
+        minConfidence: profile.riskParams.minConfidenceThreshold,
+        minConsensus: profile.riskParams.consensusThreshold,
+      })
+
+      console.log(
+        `[LOGOS] Strategy switched to ${profile.name} ` +
+        `(regime: ${result.regime.type}, confidence: ${result.regime.confidence.toFixed(2)})`
+      )
+    }
+
+    return {
+      switched: result.switched,
+      regime: result.regime,
+      profile: result.profile,
+      switchEvent: result.switchEvent,
+    }
+  }
+
+  /**
+   * Manually switch to a specific strategy
+   */
+  switchStrategy(regime: MarketRegimeType): StrategySwitchEvent {
+    const event = this.strategySwitcher.switchTo(regime, 'manual')
+    
+    // Apply new strategy weights
+    const botWeights = this.strategySwitcher.getAllBotWeights()
+    const weightsMap = new Map(Object.entries(botWeights) as [BotCode, number][])
+    this.aggregator.setBotWeightsOverride(weightsMap)
+
+    // Update aggregation config
+    const profile = this.strategySwitcher.getCurrentProfile()
+    this.aggregator.updateConfig({
+      minSignals: profile.riskParams.aggregationMinSignals,
+      minConfidence: profile.riskParams.minConfidenceThreshold,
+      minConsensus: profile.riskParams.consensusThreshold,
+    })
+
+    console.log(`[LOGOS] Manually switched to strategy: ${profile.name}`)
+    return event
+  }
+
+  /**
+   * Get current market regime
+   */
+  getCurrentRegime(): MarketRegime | null {
+    return this.strategySwitcher.getCurrentRegime()
+  }
+
+  /**
+   * Get active strategy profile
+   */
+  getActiveStrategyProfile(): StrategyProfile {
+    return this.strategySwitcher.getCurrentProfile()
+  }
+
+  /**
+   * Get all available strategy profiles
+   */
+  getAllStrategyProfiles(): Record<MarketRegimeType, StrategyProfile> {
+    return this.strategySwitcher.getAllProfiles()
+  }
+
+  /**
+   * Get strategy switcher statistics
+   */
+  getStrategyStats(): ReturnType<StrategySwitcher['getStats']> {
+    return this.strategySwitcher.getStats()
+  }
+
+  /**
+   * Get strategy switch history
+   */
+  getSwitchHistory(limit?: number): StrategySwitchEvent[] {
+    return this.strategySwitcher.getSwitchHistory(limit)
+  }
+
+  /**
+   * Get current bot weights from strategy
+   */
+  getBotWeights(): Record<BotCode, number> {
+    return this.strategySwitcher.getAllBotWeights()
+  }
+
+  /**
    * Get engine status
    */
-  getStatus(): { status: string; config: AggregationConfig } {
-    return {
+  getStatus(): { status: string; config: LOGOSEngineConfig; strategy?: {
+    profile: string
+    regime: MarketRegimeType | null
+    autoSwitching: boolean
+  } } {
+    const baseStatus = {
       status: this.status,
       config: this.config,
     }
+
+    if (this.config.enableStrategySwitching) {
+      const profile = this.strategySwitcher.getCurrentProfile()
+      const regime = this.strategySwitcher.getCurrentRegime()
+      return {
+        ...baseStatus,
+        strategy: {
+          profile: profile.name,
+          regime: regime?.type || null,
+          autoSwitching: true,
+        },
+      }
+    }
+
+    return baseStatus
   }
 
   /**
@@ -637,9 +919,30 @@ export class LOGOSEngine {
   /**
    * Update configuration
    */
-  updateConfig(config: Partial<AggregationConfig>): void {
+  updateConfig(config: Partial<LOGOSEngineConfig>): void {
     this.config = { ...this.config, ...config }
     this.aggregator = new SignalAggregator(this.config)
+  }
+
+  /**
+   * Record signal outcome for performance tracking
+   */
+  recordSignalOutcome(pnl: number, win: boolean): void {
+    if (!this.config.enableStrategySwitching) return
+
+    const profile = this.strategySwitcher.getCurrentProfile()
+    const regime = this.strategySwitcher.getCurrentRegime()
+    
+    if (regime) {
+      this.strategySwitcher.recordOutcome(profile.name, regime.type, pnl, win)
+    }
+  }
+
+  /**
+   * Get strategy switcher instance for direct access
+   */
+  getStrategySwitcher(): StrategySwitcher {
+    return this.strategySwitcher
   }
 }
 
@@ -647,5 +950,12 @@ export class LOGOSEngine {
 // EXPORTS
 // ============================================================================
 
-export { LOGOS_BOT_METADATA, DEFAULT_AGGREGATION_CONFIG, SignalAggregator }
-export type { BotPerformance }
+export { LOGOS_BOT_METADATA, DEFAULT_AGGREGATION_CONFIG, DEFAULT_LOGOS_ENGINE_CONFIG, SignalAggregator }
+export type { 
+  BotPerformance, 
+  AggregationConfig, 
+  LOGOSEngineConfig,
+  IncomingSignal,
+  AggregatedSignal,
+  SignalContribution,
+}

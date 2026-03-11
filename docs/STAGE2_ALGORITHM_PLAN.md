@@ -1020,62 +1020,15 @@ class LFTSwingTrader {
 
 ---
 
-## 2.6. ИНТЕГРАЦИЯ LUMI (ЗАПУСК СЕРВИСА)
+## 2.6. ИНТЕГРАЦИЯ ДОПОЛНИТЕЛЬНЫХ СЕРВИСОВ
 
-### 2.6.1. Fix Plan
-
-1. **Добавить скрипт запуска в package.json**
-2. **Настроить переменные окружения**
-3. **Интегрировать с NATS**
-4. **Добавить health check**
-
-```json
-// package.json
-{
-  "scripts": {
-    "dev": "next dev -p 3000 2>&1 | tee dev.log",
-    "lumibot": "cd lumibot-service && uvicorn main:app --host 0.0.0.0 --port 8001",
-    "dev:all": "concurrently \"bun run dev\" \"bun run lumibot\""
-  }
-}
-```
-
-### 2.6.2. NATS Integration for Lumibot
-
-```python
-# lumibot-service/nats_publisher.py
-
-import asyncio
-import json
-from nats.aio.client import Client as NATS
-
-class NATSPublisher:
-    def __init__(self, nats_url: str = "nats://localhost:4222"):
-        self.nc = NATS()
-        self.nats_url = nats_url
-        
-    async def connect(self):
-        await self.nc.connect(self.nats_url)
-        
-    async def publish_signal(self, signal: dict):
-        await self.nc.publish(
-            "SIGNAL.LUMIBOT",
-            json.dumps(signal).encode()
-        )
-        
-    async def subscribe_commands(self, handler):
-        await self.nc.subscribe("COMMAND.LUMIBOT", handler)
-```
-
-### 2.6.3. Оценка времени
+### 2.6.1. Оценка времени
 
 | Этап | Время |
 |------|-------|
-| Startup script | 1 час |
-| NATS integration | 3 часа |
-| Strategy implementations | 4 часа |
-| Testing | 2 часа |
-| **Итого** | **10 часов** |
+| Интеграция с IAF | 4 часа |
+| Тестирование | 2 часа |
+| **Итого** | **6 часов** |
 
 ---
 
@@ -1179,9 +1132,9 @@ class OracleNLPProcessor {
 | 2.3 Vision Online Learning | 22 часа | P1 |
 | 2.4 Logos автономная торговля | 34 часа | P0 |
 | 2.5 HFT/MFT/LFT оптимизация | 38 часов | P2 |
-| 2.6 Lumi интеграция | 10 часов | P0 |
+| 2.6 Дополнительные сервисы | 6 часов | P2 |
 | 2.7 Развитие Оракула | 18 часов | P1 |
-| **ИТОГО** | **171 час** | - |
+| **ИТОГО** | **167 часов** | - |
 
 **Календарный план (при 8ч/день): ~22 рабочих дня**
 
@@ -1191,7 +1144,6 @@ class OracleNLPProcessor {
 
 ```
 Week 1:
-├── 2.6 Lumi интеграция (критично)
 ├── 2.4 Logos - Trading Journal
 └── 2.4 Logos - Autonomous Engine (база)
 
@@ -1222,7 +1174,6 @@ Week 4:
 | 2.3 Vision | 1.2 (Event Bus), 1.4 (Vision) |
 | 2.4 Logos | 1.2, 1.3 (Oracle), 1.5 (Risk) |
 | 2.5 HFT | 1.5, 1.6 (Multi-exchange) |
-| 2.6 Lumi | 1.1 (NATS) |
 | 2.7 Oracle | 1.3 (Oracle integration) |
 
 ---

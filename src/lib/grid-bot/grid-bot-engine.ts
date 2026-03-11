@@ -10,6 +10,7 @@
  * - Trailing grid
  * - Risk management
  * - Real-time price feed
+ * - Dynamic grid adjustment (Task 5)
  */
 
 import { EventEmitter } from 'events';
@@ -28,6 +29,13 @@ import {
   PriceUpdate,
   OrderbookSnapshot,
 } from './types';
+import {
+  DynamicGridAdjuster,
+  DynamicAdjusterConfig,
+  GridAdjustmentResult,
+  DEFAULT_DYNAMIC_ADJUSTER_CONFIG,
+} from './dynamic-adjuster';
+import { Candle } from '../strategy/types';
 
 // ==================== GRID BOT ENGINE ====================
 
@@ -47,10 +55,16 @@ export class GridBotEngine extends EventEmitter {
   private priceCheckInterval: NodeJS.Timeout | null = null;
   private orderCheckInterval: NodeJS.Timeout | null = null;
   private metricsInterval: NodeJS.Timeout | null = null;
+  private dynamicAdjustmentInterval: NodeJS.Timeout | null = null;
   
   // Trading state
   private isProcessing: boolean = false;
   private orderQueue: string[] = [];
+  
+  // Dynamic Adjustment (Task 5)
+  private dynamicAdjuster: DynamicGridAdjuster | null = null;
+  private candles: Candle[] = [];
+  private lastAdjustmentResult: GridAdjustmentResult | null = null;
 
   constructor(config: GridBotConfig, adapter: GridBotAdapter) {
     super();

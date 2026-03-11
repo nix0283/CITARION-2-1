@@ -81,7 +81,6 @@ CITARION.EVENTS
 | SIG | Signal Bot | integration | <1s |
 | CPY | CopyTrader | integration | <1s |
 | WLF | WolfBot | integration | <500ms |
-| LMB | Lumibot | integration | <500ms |
 
 ---
 

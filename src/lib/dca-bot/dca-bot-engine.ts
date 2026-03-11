@@ -10,6 +10,7 @@
  * - Averaging down
  * - Risk management
  * - Paper trading support
+ * - Volatility-based position sizing and level spacing
  */
 
 import { EventEmitter } from 'events';
@@ -28,6 +29,15 @@ import {
   DCABotMetrics,
   DCABotAdapter,
 } from './types';
+import {
+  VolatilityScaler,
+  VolatilityConfig,
+  VolatilityReading,
+  ScalingResult,
+  VolatilityLevel,
+  DEFAULT_VOLATILITY_CONFIG,
+} from './volatility-scaler';
+import { DCAOptimizer, OptimizedDCAConfig } from './dca-optimizer';
 
 // ==================== DCA BOT ENGINE ====================
 
@@ -39,11 +49,20 @@ export class DCABotEngine extends EventEmitter {
   // Price tracking
   private currentPrice: number = 0;
   private priceHistory: number[] = [];
+  private highHistory: number[] = [];
+  private lowHistory: number[] = [];
+  
+  // Volatility scaling
+  private volatilityScaler: VolatilityScaler | null = null;
+  private dcaOptimizer: DCAOptimizer | null = null;
+  private currentScaling: ScalingResult | null = null;
+  private lastVolatilityReading: VolatilityReading | null = null;
   
   // Intervals
   private priceCheckInterval: NodeJS.Timeout | null = null;
   private metricsInterval: NodeJS.Timeout | null = null;
   private scheduledEntryInterval: NodeJS.Timeout | null = null;
+  private volatilityCheckInterval: NodeJS.Timeout | null = null;
   
   // State
   private isProcessing: boolean = false;
@@ -54,9 +73,30 @@ export class DCABotEngine extends EventEmitter {
     this.config = config;
     this.adapter = adapter;
     this.state = this.createInitialState();
+    
+    // Initialize volatility scaler if enabled
+    if (config.volatilityScalingEnabled) {
+      this.initializeVolatilityScaling(config);
+    }
   }
 
   // ==================== LIFECYCLE ====================
+
+  /**
+   * Initialize volatility scaling components
+   */
+  private initializeVolatilityScaling(config: DCABotConfig): void {
+    const volConfig: Partial<VolatilityConfig> = {
+      enabled: true,
+      lookbackPeriod: config.volatilityLookbackPeriod || 14,
+      atrPeriod: config.volatilityLookbackPeriod || 14,
+      lowVolatilityThreshold: config.minVolatilityThreshold || 1.5,
+      highVolatilityThreshold: config.maxVolatilityThreshold || 3.5,
+    };
+    
+    this.volatilityScaler = new VolatilityScaler(volConfig);
+    this.dcaOptimizer = new DCAOptimizer(this.volatilityScaler);
+  }
 
   /**
    * Запустить бота
@@ -78,7 +118,13 @@ export class DCABotEngine extends EventEmitter {
       // Устанавливаем плечо
       await this.adapter.setLeverage(this.config.leverage);
       
-      // Инициализируем safety orders
+      // Calculate initial volatility scaling if enabled
+      if (this.config.volatilityScalingEnabled && this.volatilityScaler) {
+        await this.updateVolatilityScaling();
+        this.startVolatilityMonitoring();
+      }
+      
+      // Инициализируем safety orders (with volatility adjustments)
       this.initializeSafetyOrders();
       
       // Инициализируем take profit levels
@@ -574,10 +620,20 @@ export class DCABotEngine extends EventEmitter {
     const safetyOrders: SafetyOrder[] = [];
     const basePrice = this.currentPrice;
     
-    for (let i = 1; i <= this.config.safetyOrdersCount; i++) {
-      const deviation = this.config.safetyOrderPriceDeviation * i;
+    // Get max safety orders from volatility scaling if in extreme volatility
+    let maxSafetyOrders = this.config.safetyOrdersCount;
+    if (this.config.volatilityScalingEnabled && this.currentScaling) {
+      maxSafetyOrders = Math.min(maxSafetyOrders, this.currentScaling.maxSafetyOrders);
+    }
+    
+    for (let i = 1; i <= maxSafetyOrders; i++) {
+      // Use volatility-adjusted deviation
+      const deviation = this.getVolatilityAdjustedDeviation(i);
       const triggerPrice = basePrice * (1 - deviation / 100);
-      const quantity = this.calculateBaseQuantity() * Math.pow(this.config.safetyOrderVolumeScale, i - 1);
+      
+      // Use volatility-adjusted quantity
+      const baseQuantity = this.getVolatilityAdjustedBaseQuantity();
+      const quantity = baseQuantity * Math.pow(this.config.safetyOrderVolumeScale, i - 1);
       
       safetyOrders.push({
         level: i,
@@ -602,15 +658,16 @@ export class DCABotEngine extends EventEmitter {
     for (const safetyOrder of this.state.safetyOrders) {
       if (safetyOrder.status !== 'PENDING') continue;
       
-      // Проверяем достижение цены триггера
-      if (this.currentPrice <= safetyOrder.triggerPrice) {
+      // Проверяем достижение цены триггера с учетом волатильности
+      if (this.checkSafetyOrderWithVolatility(safetyOrder)) {
         safetyOrder.status = 'TRIGGERED';
         this.state.pendingSafetyOrders--;
         
         this.emitEvent('SAFETY_ORDER_TRIGGERED', { 
           level: safetyOrder.level, 
           triggerPrice: safetyOrder.triggerPrice,
-          currentPrice: this.currentPrice 
+          currentPrice: this.currentPrice,
+          volatilityLevel: this.state.currentVolatilityLevel,
         });
         
         // Исполняем safety order
@@ -690,12 +747,32 @@ export class DCABotEngine extends EventEmitter {
     this.currentPrice = price;
     this.state.currentPrice = price;
     
+    // Track price history for volatility
+    this.priceHistory.push(price);
+    if (this.priceHistory.length > 100) {
+      this.priceHistory.shift();
+    }
+    
     // Обновляем экстремумы
     if (price > this.state.highestPrice) {
       this.state.highestPrice = price;
+      this.highHistory.push(price);
     }
     if (price < this.state.lowestPrice) {
       this.state.lowestPrice = price;
+      this.lowHistory.push(price);
+    }
+    
+    // Update volatility scaler with price data
+    if (this.config.volatilityScalingEnabled && this.volatilityScaler) {
+      // Quick update on each price tick
+      this.lastVolatilityReading = this.volatilityScaler.updatePrice(
+        this.state.highestPrice,
+        this.state.lowestPrice,
+        price
+      );
+      this.state.lastVolatilityReading = this.lastVolatilityReading;
+      this.state.currentVolatilityLevel = this.lastVolatilityReading.volatilityLevel;
     }
     
     // Обновляем позицию
@@ -728,7 +805,10 @@ export class DCABotEngine extends EventEmitter {
     
     this.state.lastUpdate = new Date();
     
-    this.emitEvent('PRICE_UPDATE', { price });
+    this.emitEvent('PRICE_UPDATE', { 
+      price,
+      volatilityLevel: this.state.currentVolatilityLevel,
+    });
   }
 
   /**
@@ -843,7 +923,158 @@ export class DCABotEngine extends EventEmitter {
       this.scheduledEntryInterval = null;
     }
     
+    if (this.volatilityCheckInterval) {
+      clearInterval(this.volatilityCheckInterval);
+      this.volatilityCheckInterval = null;
+    }
+    
     this.adapter.unsubscribePrice();
+  }
+
+  // ==================== VOLATILITY SCALING ====================
+
+  /**
+   * Start volatility monitoring
+   */
+  private startVolatilityMonitoring(): void {
+    this.volatilityCheckInterval = setInterval(async () => {
+      if (this.state.status !== 'RUNNING' && this.state.status !== 'IN_POSITION') return;
+      
+      try {
+        await this.updateVolatilityScaling();
+      } catch (error) {
+        console.error('[DCABot] Volatility check error:', error);
+      }
+    }, 60000); // Check every minute
+  }
+
+  /**
+   * Update volatility scaling calculations
+   */
+  private async updateVolatilityScaling(): Promise<void> {
+    if (!this.volatilityScaler) return;
+    
+    // Get OHLC data if available from adapter
+    const high = this.highHistory.length > 0 ? Math.max(...this.highHistory.slice(-14)) : this.currentPrice;
+    const low = this.lowHistory.length > 0 ? Math.min(...this.lowHistory.slice(-14)) : this.currentPrice;
+    
+    // Update volatility scaler
+    this.lastVolatilityReading = this.volatilityScaler.updatePrice(
+      high,
+      low,
+      this.currentPrice
+    );
+    
+    // Calculate new scaling parameters
+    this.currentScaling = this.volatilityScaler.calculateScaling(
+      this.config.baseOrderAmount,
+      this.config.safetyOrderPriceDeviation,
+      this.currentPrice,
+      this.config.safetyOrdersCount
+    );
+    
+    // Store in state for persistence
+    this.state.lastVolatilityReading = this.lastVolatilityReading;
+    this.state.currentVolatilityLevel = this.lastVolatilityReading.volatilityLevel;
+    
+    this.emitEvent('VOLATILITY_UPDATE', {
+      reading: this.lastVolatilityReading,
+      scaling: this.currentScaling,
+    });
+  }
+
+  /**
+   * Get volatility-adjusted base quantity
+   */
+  private getVolatilityAdjustedBaseQuantity(): number {
+    let baseQuantity = this.calculateBaseQuantity();
+    
+    if (this.config.volatilityScalingEnabled && this.currentScaling) {
+      baseQuantity *= this.currentScaling.positionSizeMultiplier;
+    }
+    
+    return baseQuantity;
+  }
+
+  /**
+   * Get volatility-adjusted safety order price deviation
+   */
+  private getVolatilityAdjustedDeviation(level: number): number {
+    let deviation = this.config.safetyOrderPriceDeviation * level;
+    
+    if (this.config.volatilityScalingEnabled && this.currentScaling) {
+      deviation *= this.currentScaling.levelSpacingMultiplier;
+      
+      // Progressive spacing - each level further apart
+      deviation *= (1 + (level - 1) * 0.1);
+    }
+    
+    return deviation;
+  }
+
+  /**
+   * Check if safety order should be triggered with volatility consideration
+   */
+  private checkSafetyOrderWithVolatility(safetyOrder: SafetyOrder): boolean {
+    if (!this.config.volatilityScalingEnabled || !this.volatilityScaler) {
+      return this.currentPrice <= safetyOrder.triggerPrice;
+    }
+    
+    const result = this.volatilityScaler.shouldTriggerSafetyOrder(
+      this.currentPrice,
+      safetyOrder.triggerPrice,
+      this.config.direction || 'LONG'
+    );
+    
+    return result.shouldTrigger;
+  }
+
+  /**
+   * Get optimized DCA parameters
+   */
+  getOptimizedParameters(availableCapital: number): OptimizedDCAConfig | null {
+    if (!this.dcaOptimizer || !this.lastVolatilityReading) return null;
+    
+    return this.dcaOptimizer.optimize({
+      availableCapital,
+      riskTolerance: 'MODERATE',
+      targetProfitPercent: this.config.takeProfitPercent,
+      maxDrawdownPercent: this.config.maxDrawdown,
+      volatilityLevel: this.lastVolatilityReading.volatilityLevel,
+      atrPercent: this.lastVolatilityReading.atrPercent,
+      currentPrice: this.currentPrice,
+    });
+  }
+
+  /**
+   * Get current volatility reading
+   */
+  getVolatilityReading(): VolatilityReading | null {
+    return this.lastVolatilityReading;
+  }
+
+  /**
+   * Get current scaling parameters
+   */
+  getCurrentScaling(): ScalingResult | null {
+    return this.currentScaling;
+  }
+
+  /**
+   * Update volatility config
+   */
+  updateVolatilityConfig(config: Partial<VolatilityConfig>): void {
+    if (this.volatilityScaler) {
+      this.volatilityScaler.updateConfig(config);
+    }
+  }
+
+  /**
+   * Get volatility scaling history
+   */
+  getVolatilityHistory(limit?: number) {
+    if (!this.volatilityScaler) return [];
+    return this.volatilityScaler.getHistory(limit);
   }
 
   // ==================== CALCULATIONS ====================
@@ -938,6 +1169,10 @@ export class DCABotEngine extends EventEmitter {
       highestPrice: 0,
       lowestPrice: Infinity,
       trailingActivated: false,
+      // Volatility scaling state
+      lastVolatilityReading: null,
+      currentVolatilityLevel: 'NORMAL',
+      scalingHistory: [],
     };
   }
 
