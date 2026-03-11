@@ -7,11 +7,17 @@
  * Trading modes:
  * - DEMO: Virtual trading with simulated positions
  * - No real exchange connection required
+ * 
+ * Uses PriceService for real-time prices from:
+ * - WebSocket cache
+ * - Database cache
+ * - Exchange REST API fallback
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getDefaultUser } from "@/lib/auth-utils";
+import { priceService } from "@/lib/price/price-service";
 
 interface DemoTradeRequest {
   symbol: string;
@@ -26,29 +32,7 @@ interface DemoTradeRequest {
   exchangeId?: string;
 }
 
-// Demo prices for simulation
-const DEMO_PRICES: Record<string, number> = {
-  BTCUSDT: 67500,
-  ETHUSDT: 3500,
-  BNBUSDT: 600,
-  SOLUSDT: 175,
-  XRPUSDT: 0.52,
-  DOGEUSDT: 0.15,
-  ADAUSDT: 0.45,
-  AVAXUSDT: 35,
-  LINKUSDT: 14,
-  DOTUSDT: 7,
-  MATICUSDT: 0.5,
-  LTCUSDT: 85,
-  ATOMUSDT: 9,
-  UNIUSDT: 7,
-  NEARUSDT: 5,
-};
-
-function getDemoPrice(symbol: string): number {
-  const upperSymbol = symbol.toUpperCase().replace(/[^A-Z]/g, "");
-  return DEMO_PRICES[upperSymbol + "USDT"] || DEMO_PRICES[upperSymbol] || 100;
-}
+// Removed static DEMO_PRICES - now using PriceService for real-time prices
 
 export async function POST(request: NextRequest) {
   try {
@@ -106,8 +90,8 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Get current demo price
-    const currentPrice = entryPrices[0] || getDemoPrice(symbol);
+    // Get current price from PriceService (real-time from WebSocket/DB/API)
+    const currentPrice = entryPrices[0] || await priceService.getPrice(symbol, exchangeId);
     const tradeAmount = amount || 100;
     const tradeLeverage = marketType === "SPOT" ? 1 : leverage;
     const quantity = (tradeAmount * tradeLeverage) / currentPrice;

@@ -1,10 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* React Grid Layout CSS - required for multi-chart panel */
-@import "../../node_modules/react-grid-layout/css/styles.css";
-@import "../../node_modules/react-resizable/css/styles.css";
-
 @custom-variant dark (&:is(.dark *));
 
 /* Binance-inspired color scheme for CITARION */
